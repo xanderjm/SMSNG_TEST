@@ -169,22 +169,45 @@ function determineSpace(
   const hour = passiveInputs.hour;
   const location = activeInputs.semanticLocation;
 
-  // Rest period
-  if (hour < persona.typicalWakeTime || hour >= persona.typicalSleepTime + 1) {
+  // Handle overnight sleep properly
+  // typicalSleepTime might be < typicalWakeTime if the person sleeps past midnight
+  const isAsleep = (() => {
+    const wake = persona.typicalWakeTime;
+    const sleep = persona.typicalSleepTime;
+
+    if (sleep > wake) {
+      // Normal case: wake at 7, sleep at 22
+      // Asleep if before wake OR at/after sleep
+      return hour < wake || hour >= sleep;
+    } else {
+      // Overnight case: wake at 8, sleep at 1 (past midnight)
+      // Asleep if after sleep AND before wake (i.e., between 1am and 8am)
+      return hour >= sleep && hour < wake;
+    }
+  })();
+
+  // Rest period - but allow some variation
+  if (isAsleep) {
     return 'rest';
   }
 
-  // Wind-down mode
-  if (synthesis?.derivedWindDownMode || (hour >= persona.typicalSleepTime - 2 && hour < persona.typicalSleepTime)) {
+  // Wind-down mode - 2 hours before typical sleep
+  const hoursUntilSleep = (() => {
+    const sleep = persona.typicalSleepTime;
+    if (sleep > hour) return sleep - hour;
+    return (24 - hour) + sleep; // crosses midnight
+  })();
+
+  if (synthesis?.derivedWindDownMode || (hoursUntilSleep <= 2 && hoursUntilSleep > 0)) {
     return 'wind-down';
   }
 
-  // Morning routine
+  // Morning routine - first 2 hours after waking
   if (hour >= persona.typicalWakeTime && hour < persona.typicalWakeTime + 2) {
     return 'morning-routine';
   }
 
-  // In meeting
+  // In meeting - check calendar
   const inMeeting = passiveInputs.calendarEvents.some(
     e => e.startHour <= hour && e.endHour > hour && e.type === 'meeting'
   );
@@ -217,7 +240,7 @@ function determineSpace(
     return 'social';
   }
 
-  // Work focus
+  // Work focus - during work hours with high focus
   if (synthesis?.derivedFocusWindow || (location === 'work' && memoryBuckets.currentIntent.focusLevel > 0.5)) {
     return 'work-focus';
   }
@@ -231,7 +254,7 @@ function determineSpace(
 }
 
 export function PhoneSimulator() {
-  const { phoneScreenState, orchestratorState, currentMoment, contextSynthesis, personas, selectedPersonaId } =
+  const { phoneScreenState, orchestratorState, currentMoment, contextSynthesis, personas, selectedPersonaId, hourProgress, isPlaying } =
     useSimulationStore();
 
   const persona = personas.find((p) => p.id === selectedPersonaId);
@@ -284,7 +307,7 @@ export function PhoneSimulator() {
               <div className="absolute top-3 left-1/2 -translate-x-1/2 w-3 h-3 bg-black rounded-full z-20 ring-1 ring-gray-800" />
 
             {/* Status Bar */}
-            <StatusBar phoneState={phoneScreenState} isDark={isDarkSpace} />
+            <StatusBar phoneState={phoneScreenState} isDark={isDarkSpace} hourProgress={hourProgress} isPlaying={isPlaying} />
 
             {/* Main Content */}
             <div className="px-4 pt-10 pb-4 h-full flex flex-col relative z-10">
@@ -294,6 +317,8 @@ export function PhoneSimulator() {
                 config={spaceConfig}
                 moment={currentMoment}
                 isDark={isDarkSpace}
+                hourProgress={hourProgress}
+                isPlaying={isPlaying}
               />
 
               {/* Primary Content Area */}
@@ -334,10 +359,10 @@ export function PhoneSimulator() {
           </div>
         </div>
 
-        {/* Mode Badge */}
+        {/* Mode Badge - Enhanced with descriptions */}
         {orchestratorState && (
           <div
-            className={`absolute -right-2 top-28 px-2.5 py-1 rounded-l-lg text-[10px] font-medium ${
+            className={`absolute -right-2 top-28 px-2.5 py-1.5 rounded-l-lg text-[10px] font-medium flex flex-col items-start gap-0.5 ${
               orchestratorState.currentMode === 'silent'
                 ? 'bg-amber-500 text-amber-950'
                 : orchestratorState.currentMode === 'notify'
@@ -345,15 +370,49 @@ export function PhoneSimulator() {
                 : 'bg-green-500 text-green-950'
             }`}
           >
-            {orchestratorState.currentMode.toUpperCase()}
+            <span className="font-bold">
+              {orchestratorState.currentMode === 'silent' ? '🔕 QUIET' :
+               orchestratorState.currentMode === 'notify' ? '🔔 ALERT' :
+               '✨ SMART'}
+            </span>
+            <span className="text-[8px] opacity-80 max-w-[60px] leading-tight">
+              {orchestratorState.currentMode === 'silent' ? 'Holding notifications' :
+               orchestratorState.currentMode === 'notify' ? 'Action needed' :
+               'Context adapting'}
+            </span>
           </div>
+        )}
+
+        {/* Mode Indicator inside phone - shows current behavior */}
+        {orchestratorState && orchestratorState.currentMode !== 'adapt' && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className={`absolute bottom-20 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-full text-[10px] font-medium flex items-center gap-1.5 z-30 ${
+              orchestratorState.currentMode === 'silent'
+                ? 'bg-amber-500/90 text-amber-950'
+                : 'bg-blue-500/90 text-white'
+            }`}
+          >
+            {orchestratorState.currentMode === 'silent' ? (
+              <>
+                <BellOff className="w-3 h-3" />
+                <span>{orchestratorState.recentDecisions.length} items held</span>
+              </>
+            ) : (
+              <>
+                <Bell className="w-3 h-3" />
+                <span>Attention needed</span>
+              </>
+            )}
+          </motion.div>
         )}
       </div>
 
       {/* Context Info - Fixed height to prevent layout shift */}
-      <div className="mt-4 text-center max-w-sm h-12 flex flex-col justify-start">
+      <div className="mt-4 text-center max-w-sm h-14 flex flex-col justify-start">
         <p className="text-xs text-gray-500">{spaceConfig.description}</p>
-        <p className="text-xs text-gray-400 mt-1 truncate">
+        <p className="text-xs text-gray-400 mt-1 line-clamp-2">
           {orchestratorState?.modeReasoning || '\u00A0'}
         </p>
       </div>
@@ -361,12 +420,23 @@ export function PhoneSimulator() {
   );
 }
 
-function StatusBar({ phoneState, isDark }: { phoneState: PhoneScreenState; isDark: boolean }) {
+function StatusBar({ phoneState, isDark, hourProgress, isPlaying }: { phoneState: PhoneScreenState; isDark: boolean; hourProgress: number; isPlaying: boolean }) {
   const textColor = isDark ? 'text-white' : 'text-gray-800';
+
+  // Calculate smooth time for status bar
+  const baseTimeStr = phoneState.timeDisplay; // e.g., "9:00 AM"
+  const match = baseTimeStr.match(/^(\d+):(\d+)\s*(AM|PM)$/i);
+
+  let displayTime = baseTimeStr;
+  if (match && isPlaying) {
+    const baseHour = parseInt(match[1]);
+    const minutes = Math.floor(hourProgress * 60);
+    displayTime = `${baseHour}:${minutes.toString().padStart(2, '0')} ${match[3]}`;
+  }
 
   return (
     <div className={`absolute top-0 left-0 right-0 px-5 pt-2 flex justify-between items-center ${textColor} text-xs z-10`}>
-      <div className="text-[11px] font-medium">{phoneState.timeDisplay}</div>
+      <div className="text-[11px] font-medium font-mono tabular-nums">{displayTime}</div>
       {/* Leave space for punch-hole camera in center */}
       <div className="flex items-center gap-1.5">
         {phoneState.doNotDisturb && <BellOff className="w-3 h-3" />}
@@ -384,12 +454,16 @@ function SpaceHeader({
   space,
   config,
   moment,
-  isDark
+  isDark,
+  hourProgress,
+  isPlaying
 }: {
   space: SpaceType;
   config: SpaceConfig;
   moment: MomentState;
   isDark: boolean;
+  hourProgress: number;
+  isPlaying: boolean;
 }) {
   const textColor = isDark ? 'text-white' : 'text-gray-900';
   const subTextColor = isDark ? 'text-white/70' : 'text-gray-600';
@@ -397,19 +471,17 @@ function SpaceHeader({
   const h = hour % 12 || 12;
   const ampm = hour >= 12 ? 'PM' : 'AM';
 
+  // Smooth minute calculation
+  const minutes = isPlaying ? Math.floor(hourProgress * 60) : 0;
+
   const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
   const dayName = days[moment.passiveInputs.dayOfWeek];
 
   return (
     <div className="text-center">
-      <motion.div
-        key={`time-${hour}`}
-        initial={{ y: -10, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        className={`text-5xl font-extralight tracking-tight ${textColor}`}
-      >
-        {h}:{String(hour % 60).padStart(2, '0')} <span className="text-2xl">{ampm}</span>
-      </motion.div>
+      <div className={`text-5xl font-extralight tracking-tight ${textColor} font-mono tabular-nums`}>
+        {h}:{minutes.toString().padStart(2, '0')} <span className="text-2xl">{ampm}</span>
+      </div>
       <div className={`text-sm mt-1 ${subTextColor}`}>
         {dayName}
       </div>

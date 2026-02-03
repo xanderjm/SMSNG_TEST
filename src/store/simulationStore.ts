@@ -23,6 +23,10 @@ interface SimulationStore extends SimulationState {
   togglePlayback: () => void;
   setPlaybackSpeed: (speed: number) => void;
 
+  // Smooth playback progress (0-1 within current hour)
+  hourProgress: number;
+  setHourProgress: (progress: number) => void;
+
   // Parameters
   setConfidenceThreshold: (value: number) => void;
   setProactivityLevel: (level: TunableParameters['proactivityLevel']) => void;
@@ -41,6 +45,7 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
   currentHourIndex: 9, // 9 AM
   isPlaying: false,
   playbackSpeed: 1,
+  hourProgress: 0, // Smooth progress within the hour (0-1)
   parameters: {
     confidenceThreshold: 70,
     proactivityLevel: 'medium',
@@ -79,7 +84,7 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
   },
 
   setHour: (hourIndex: number) => {
-    set({ currentHourIndex: Math.max(0, Math.min(23, hourIndex)) });
+    set({ currentHourIndex: Math.max(0, Math.min(23, hourIndex)), hourProgress: 0 });
     get()._updateSimulationState();
   },
 
@@ -98,6 +103,10 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
 
   setPlaybackSpeed: (speed: number) => {
     set({ playbackSpeed: speed });
+  },
+
+  setHourProgress: (progress: number) => {
+    set({ hourProgress: progress });
   },
 
   setConfidenceThreshold: (value: number) => {
@@ -181,34 +190,68 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
   },
 }));
 
-// Playback interval manager
-let playbackInterval: ReturnType<typeof setInterval> | null = null;
+// Smooth playback manager using requestAnimationFrame
+let animationFrameId: number | null = null;
+let lastTimestamp: number | null = null;
+
+// Duration in ms for one simulated hour at 1x speed
+const HOUR_DURATION_MS = 2000; // 2 seconds per hour feels smooth
 
 export function startPlaybackLoop() {
-  if (playbackInterval) return;
+  if (animationFrameId) return;
 
-  playbackInterval = setInterval(() => {
+  lastTimestamp = null;
+
+  const animate = (timestamp: number) => {
     const state = useSimulationStore.getState();
-    if (!state.isPlaying) return;
 
-    let { currentHourIndex, currentDayIndex } = state;
-    currentHourIndex += 1;
-
-    if (currentHourIndex >= 24) {
-      currentHourIndex = 0;
-      currentDayIndex += 1;
-      if (currentDayIndex >= 365) {
-        currentDayIndex = 0;
-      }
+    if (!state.isPlaying) {
+      animationFrameId = requestAnimationFrame(animate);
+      return;
     }
 
-    state.setDateTime(currentDayIndex, currentHourIndex);
-  }, 1000); // Update every second at 1x speed
+    if (lastTimestamp === null) {
+      lastTimestamp = timestamp;
+    }
+
+    const deltaMs = timestamp - lastTimestamp;
+    const speedMultiplier = state.playbackSpeed;
+    const progressDelta = (deltaMs / HOUR_DURATION_MS) * speedMultiplier;
+
+    let newProgress = state.hourProgress + progressDelta;
+    let { currentHourIndex, currentDayIndex } = state;
+
+    // Handle hour transitions
+    while (newProgress >= 1) {
+      newProgress -= 1;
+      currentHourIndex += 1;
+
+      if (currentHourIndex >= 24) {
+        currentHourIndex = 0;
+        currentDayIndex += 1;
+        if (currentDayIndex >= 365) {
+          currentDayIndex = 0;
+        }
+      }
+
+      // Update the simulation state for the new hour
+      state.setDateTime(currentDayIndex, currentHourIndex);
+    }
+
+    // Update progress smoothly
+    state.setHourProgress(newProgress);
+    lastTimestamp = timestamp;
+
+    animationFrameId = requestAnimationFrame(animate);
+  };
+
+  animationFrameId = requestAnimationFrame(animate);
 }
 
 export function stopPlaybackLoop() {
-  if (playbackInterval) {
-    clearInterval(playbackInterval);
-    playbackInterval = null;
+  if (animationFrameId) {
+    cancelAnimationFrame(animationFrameId);
+    animationFrameId = null;
+    lastTimestamp = null;
   }
 }

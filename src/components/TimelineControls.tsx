@@ -17,6 +17,7 @@ export function TimelineControls() {
   const {
     currentDayIndex,
     currentHourIndex,
+    hourProgress,
     isPlaying,
     setDay,
     setHour,
@@ -24,6 +25,9 @@ export function TimelineControls() {
     togglePlayback,
     selectedPersonaId,
   } = useSimulationStore();
+
+  // Smooth time value for display
+  const smoothHourValue = currentHourIndex + hourProgress;
 
   // Start/stop playback loop based on isPlaying state
   useEffect(() => {
@@ -47,9 +51,17 @@ export function TimelineControls() {
   };
 
   const formatHour = (hour: number) => {
-    const h = hour % 12 || 12;
-    const ampm = hour >= 12 ? 'PM' : 'AM';
+    const h = Math.floor(hour) % 12 || 12;
+    const ampm = Math.floor(hour) >= 12 ? 'PM' : 'AM';
     return `${h}:00 ${ampm}`;
+  };
+
+  // Format time with minutes for smooth display
+  const formatSmoothTime = (hour: number) => {
+    const h = Math.floor(hour) % 12 || 12;
+    const m = Math.floor((hour % 1) * 60);
+    const ampm = Math.floor(hour) >= 12 ? 'PM' : 'AM';
+    return `${h}:${m.toString().padStart(2, '0')} ${ampm}`;
   };
 
   const getDayOfWeek = (dayIndex: number) => {
@@ -84,8 +96,8 @@ export function TimelineControls() {
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2">
               <TimeIcon className="w-5 h-5 text-amber-400" />
-              <span className="text-2xl font-light text-white">
-                {formatHour(currentHourIndex)}
+              <span className="text-2xl font-light text-white font-mono tabular-nums">
+                {isPlaying ? formatSmoothTime(smoothHourValue) : formatHour(currentHourIndex)}
               </span>
             </div>
             <div className="text-gray-400">
@@ -179,15 +191,23 @@ export function TimelineControls() {
             <span>12:00 AM</span>
           </div>
           <div className="relative">
+            {/* Background track */}
+            <div className="w-full h-2 bg-[#2a2a3e] rounded-lg absolute" />
+            {/* Smooth progress fill */}
+            <div
+              className="h-2 bg-gradient-to-r from-indigo-500 to-purple-500 rounded-lg absolute transition-all duration-75"
+              style={{ width: `${(smoothHourValue / 24) * 100}%` }}
+            />
+            {/* Interactive range input */}
             <input
               type="range"
               min="0"
               max="23"
               value={currentHourIndex}
               onChange={(e) => setHour(parseInt(e.target.value))}
-              className="w-full h-2 bg-[#2a2a3e] rounded-lg appearance-none cursor-pointer accent-indigo-500"
+              className="w-full h-2 bg-transparent rounded-lg appearance-none cursor-pointer relative z-10"
               style={{
-                background: `linear-gradient(to right, #6366f1 0%, #6366f1 ${(currentHourIndex / 23) * 100}%, #2a2a3e ${(currentHourIndex / 23) * 100}%, #2a2a3e 100%)`,
+                WebkitAppearance: 'none',
               }}
             />
             {/* Hour markers */}
@@ -195,9 +215,9 @@ export function TimelineControls() {
               {[...Array(24)].map((_, i) => (
                 <div
                   key={i}
-                  className={`w-0.5 h-2 rounded-full ${
-                    i === currentHourIndex
-                      ? 'bg-indigo-500'
+                  className={`w-0.5 h-2 rounded-full transition-colors ${
+                    i <= currentHourIndex
+                      ? 'bg-indigo-400'
                       : i % 6 === 0
                       ? 'bg-gray-600'
                       : 'bg-gray-700'

@@ -240,7 +240,9 @@ export function PhoneSimulator() {
     return (
       <div className="flex items-center justify-center h-full">
         <div className="text-gray-500 text-center">
-          <div className="w-[280px] h-[580px] border-4 border-gray-700 rounded-[3rem] mx-auto mb-4 flex items-center justify-center bg-gray-900/50">
+          {/* Samsung Galaxy S25 Ultra - empty state */}
+          <div className="w-[280px] h-[608px] border-[3px] border-gray-600 rounded-[1.25rem] mx-auto mb-4 flex items-center justify-center bg-gray-900/50 shadow-xl"
+               style={{ boxShadow: 'inset 0 0 0 2px #1a1a2e, 0 25px 50px -12px rgba(0, 0, 0, 0.5)' }}>
             <div className="text-center px-8">
               <Sparkles className="w-12 h-12 mx-auto mb-4 opacity-30" />
               <span className="text-sm opacity-50">Select a persona to begin simulation</span>
@@ -257,21 +259,29 @@ export function PhoneSimulator() {
 
   return (
     <div className="flex flex-col items-center justify-center h-full py-4">
-      {/* Phone Frame */}
+      {/* Samsung Galaxy S25 Ultra Frame */}
       <div className="relative">
-        {/* Outer Frame */}
-        <div className="w-[300px] h-[620px] bg-gray-900 rounded-[3rem] p-2 shadow-2xl ring-1 ring-white/10">
-          {/* Inner Screen */}
-          <motion.div
-            key={currentSpace}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 0.5 }}
-            className={`w-full h-full rounded-[2.5rem] overflow-hidden relative bg-gradient-to-b ${spaceConfig.gradient}`}
-            style={{ opacity: 0.4 + phoneScreenState.brightness * 0.6 }}
-          >
-            {/* Notch */}
-            <div className="absolute top-0 left-1/2 -translate-x-1/2 w-28 h-7 bg-black rounded-b-3xl z-20" />
+        {/* Titanium Outer Frame - S25 Ultra has flat edges and subtle corners */}
+        <div
+          className="w-[290px] h-[628px] rounded-[1.5rem] p-[3px] shadow-2xl"
+          style={{
+            background: 'linear-gradient(145deg, #4a4a5a 0%, #2a2a3a 50%, #3a3a4a 100%)',
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255,255,255,0.1)'
+          }}
+        >
+          {/* Inner bezel */}
+          <div className="w-full h-full bg-[#0a0a0f] rounded-[1.35rem] p-[2px]">
+            {/* Screen */}
+            <motion.div
+              key={currentSpace}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ duration: 0.5 }}
+              className={`w-full h-full rounded-[1.25rem] overflow-hidden relative bg-gradient-to-b ${spaceConfig.gradient}`}
+              style={{ opacity: 0.4 + phoneScreenState.brightness * 0.6 }}
+            >
+              {/* Punch-hole camera - S25 Ultra style (centered) */}
+              <div className="absolute top-3 left-1/2 -translate-x-1/2 w-3 h-3 bg-black rounded-full z-20 ring-1 ring-gray-800" />
 
             {/* Status Bar */}
             <StatusBar phoneState={phoneScreenState} isDark={isDarkSpace} />
@@ -303,19 +313,17 @@ export function PhoneSimulator() {
                 isDark={isDarkSpace}
               />
 
-              {/* Home Indicator */}
+              {/* Home Indicator - Samsung style (thinner) */}
               <div className="flex justify-center mt-3">
-                <div className={`w-32 h-1 rounded-full ${isDarkSpace ? 'bg-white/20' : 'bg-black/20'}`} />
+                <div className={`w-28 h-[3px] rounded-full ${isDarkSpace ? 'bg-white/30' : 'bg-black/30'}`} />
               </div>
             </div>
           </motion.div>
+          </div>
         </div>
 
         {/* Space Badge */}
-        <motion.div
-          key={`badge-${currentSpace}`}
-          initial={{ x: 20, opacity: 0 }}
-          animate={{ x: 0, opacity: 1 }}
+        <div
           className={`absolute -right-2 top-16 px-3 py-2 rounded-l-xl text-xs font-medium shadow-lg ${
             isDarkSpace ? 'bg-white/90 text-gray-800' : 'bg-gray-900/90 text-white'
           }`}
@@ -324,7 +332,7 @@ export function PhoneSimulator() {
             <spaceConfig.icon className="w-3.5 h-3.5" />
             <span>{spaceConfig.name}</span>
           </div>
-        </motion.div>
+        </div>
 
         {/* Mode Badge */}
         {orchestratorState && (
@@ -342,12 +350,12 @@ export function PhoneSimulator() {
         )}
       </div>
 
-      {/* Context Info */}
-      <div className="mt-4 text-center max-w-sm">
+      {/* Context Info - Fixed height to prevent layout shift */}
+      <div className="mt-4 text-center max-w-sm h-12 flex flex-col justify-start">
         <p className="text-xs text-gray-500">{spaceConfig.description}</p>
-        {orchestratorState?.modeReasoning && (
-          <p className="text-xs text-gray-400 mt-1">{orchestratorState.modeReasoning}</p>
-        )}
+        <p className="text-xs text-gray-400 mt-1 truncate">
+          {orchestratorState?.modeReasoning || '\u00A0'}
+        </p>
       </div>
     </div>
   );
@@ -357,8 +365,9 @@ function StatusBar({ phoneState, isDark }: { phoneState: PhoneScreenState; isDar
   const textColor = isDark ? 'text-white' : 'text-gray-800';
 
   return (
-    <div className={`absolute top-0 left-0 right-0 px-8 pt-2 flex justify-between items-center ${textColor} text-xs z-10`}>
+    <div className={`absolute top-0 left-0 right-0 px-5 pt-2 flex justify-between items-center ${textColor} text-xs z-10`}>
       <div className="text-[11px] font-medium">{phoneState.timeDisplay}</div>
+      {/* Leave space for punch-hole camera in center */}
       <div className="flex items-center gap-1.5">
         {phoneState.doNotDisturb && <BellOff className="w-3 h-3" />}
         <Wifi className="w-3.5 h-3.5" style={{ opacity: 0.5 + phoneState.signalStrength * 0.5 }} />

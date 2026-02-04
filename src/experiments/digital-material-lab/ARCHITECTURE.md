@@ -93,13 +93,14 @@ Effects have two modes that control how the animation curve is played:
 
 3. **Final Value**: `min + (max - min) * curveOutput`
 
-### Example: Corner Roundness Effect
+### Example: Corner Roundness Effect (State Mode)
 
 ```typescript
 {
   id: 'cornerRadius',
   name: 'Corner Roundness',
   enabled: true,
+  mode: 'state',       // Different values when expanded vs contracted
   min: 0.01,           // Minimum corner radius
   max: 0.15,           // Maximum corner radius
   startT: 0,           // Start transitioning immediately
@@ -111,6 +112,25 @@ Effects have two modes that control how the animation curve is played:
 }
 ```
 
+### Example: Focus Effect (Animate Mode)
+
+```typescript
+{
+  id: 'focus',
+  name: 'Focus',
+  enabled: true,
+  mode: 'animate',     // Always plays forward on each trigger
+  min: 0,              // Sharp (no blur)
+  max: 20,             // Maximum blur
+  startT: 0,
+  endT: 1,
+  curvePoints: [
+    { x: 0, y: 1 },    // Start blurred
+    { x: 1, y: 0 },    // End sharp
+  ],
+}
+```
+
 ### Parabolic Effect Example
 
 ```typescript
@@ -118,6 +138,7 @@ Effects have two modes that control how the animation curve is played:
   id: 'bounce',
   name: 'Bounce Effect',
   enabled: true,
+  mode: 'animate',     // One-shot animation
   min: 0,
   max: 1,
   startT: 0,
@@ -143,6 +164,7 @@ const defaultAnimConfig: AnimationConfig = {
       id: 'myNewEffect',
       name: 'My New Effect',
       enabled: true,
+      mode: 'state',        // or 'animate' for one-shot effects
       min: 0,
       max: 1,
       startT: 0,
@@ -161,7 +183,7 @@ const defaultAnimConfig: AnimationConfig = {
 ```typescript
 const myEffect = animConfig.effects.find(e => e.id === 'myNewEffect');
 const myEffectValue = myEffect
-  ? calculateEffectValue(myEffect, expansionProgress)
+  ? calculateEffectValue(myEffect, expansionProgress, masterProgress)
   : defaultValue;
 
 // Apply clamping if needed
@@ -170,6 +192,10 @@ const clampedValue = Math.min(myEffectValue, maxAllowedValue);
 // Use in shader or geometry
 setUniform1f('u_myEffect', clampedValue);
 ```
+
+**Note**: `calculateEffectValue` takes both `expansionProgress` and `masterProgress`:
+- State mode effects use `expansionProgress` (0=contracted, 1=expanded)
+- Animate mode effects use `masterProgress` (always 0→1 on trigger)
 
 ### Step 3: Add UI Controls in SettingsPanel
 

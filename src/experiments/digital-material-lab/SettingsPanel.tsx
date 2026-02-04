@@ -191,6 +191,38 @@ function EffectEditor({ effect, onChange }: EffectEditorProps) {
 
       {effect.enabled && (
         <>
+          {/* Mode Toggle */}
+          <div className="mb-4">
+            <span className="text-[11px] font-medium text-neutral-400 block mb-2">Mode</span>
+            <div className="flex gap-2">
+              <button
+                onClick={() => onChange({ ...effect, mode: 'state' })}
+                className={`flex-1 px-3 py-2 text-[10px] rounded transition-colors ${
+                  effect.mode === 'state'
+                    ? 'bg-neutral-600 text-neutral-100'
+                    : 'bg-neutral-800 text-neutral-500 hover:bg-neutral-700'
+                }`}
+              >
+                State
+              </button>
+              <button
+                onClick={() => onChange({ ...effect, mode: 'animate' })}
+                className={`flex-1 px-3 py-2 text-[10px] rounded transition-colors ${
+                  effect.mode === 'animate'
+                    ? 'bg-neutral-600 text-neutral-100'
+                    : 'bg-neutral-800 text-neutral-500 hover:bg-neutral-700'
+                }`}
+              >
+                Animate
+              </button>
+            </div>
+            <p className="text-[9px] text-neutral-600 mt-1.5">
+              {effect.mode === 'state'
+                ? 'Curve follows expansion state (forward/backward)'
+                : 'Curve always plays forward on each trigger'}
+            </p>
+          </div>
+
           {/* Value Range */}
           <div className="mb-4">
             <span className="text-[11px] font-medium text-neutral-400 block mb-2">Range</span>

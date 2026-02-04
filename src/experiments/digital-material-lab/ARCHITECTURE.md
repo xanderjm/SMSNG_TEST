@@ -26,10 +26,11 @@ interface Effect {
   id: string;                    // Unique identifier
   name: string;                  // Display name in UI
   enabled: boolean;              // Toggle on/off
+  mode: 'state' | 'animate';     // Animation mode (see below)
   min: number;                   // Minimum possible value (absolute)
   max: number;                   // Maximum possible value (absolute)
-  startT: number;                // When effect starts (0-1 of expansion)
-  endT: number;                  // When effect ends (0-1 of expansion)
+  startT: number;                // When effect starts (0-1 of timeline)
+  endT: number;                  // When effect ends (0-1 of timeline)
   curvePoints: CurvePoint[];     // Multi-point bezier curve defining the effect shape
 }
 
@@ -40,6 +41,33 @@ interface CurvePoint {
   handleIn?: { x: number; y: number };   // Control handle coming in (from left)
   handleOut?: { x: number; y: number };  // Control handle going out (to right)
 }
+```
+
+### Effect Modes
+
+Effects have two modes that control how the animation curve is played:
+
+**State Mode** (`mode: 'state'`):
+- Curve follows the expansion state
+- Expanding: curve plays forward (0→1)
+- Collapsing: curve plays backward (1→0)
+- Use for: properties that should be different when expanded vs contracted
+- Example: Corner radius (sharp when contracted, rounded when expanded)
+
+**Animate Mode** (`mode: 'animate'`):
+- Curve always plays forward (0→1) on every trigger
+- Same animation whether expanding or collapsing
+- Use for: one-shot effects, transitions, visual feedback
+- Example: Focus/blur effect (blur in, then sharpen)
+
+```typescript
+// State mode - corner radius follows expansion state
+{ mode: 'state', curvePoints: [{ x: 0, y: 0 }, { x: 1, y: 1 }] }
+// Result: Contracted = min, Expanded = max
+
+// Animate mode - blur effect plays same each time
+{ mode: 'animate', curvePoints: [{ x: 0, y: 1 }, { x: 1, y: 0 }] }
+// Result: Always starts blurred, ends sharp
 ```
 
 **Bezier Handles**: Each point can have two bezier handles to control the curve shape:
@@ -354,6 +382,7 @@ export interface Effect {
   id: string;
   name: string;
   enabled: boolean;
+  mode: 'state' | 'animate';  // 'state' follows expansion, 'animate' always forward
   min: number;
   max: number;
   startT: number;

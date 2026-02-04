@@ -14,10 +14,11 @@ export interface Effect {
   id: string;
   name: string;
   enabled: boolean;
+  mode: 'state' | 'animate';  // 'state' = follows expansion state, 'animate' = always plays forward
   min: number;             // Minimum possible value (absolute)
   max: number;             // Maximum possible value (absolute)
-  startT: number;          // When effect starts transitioning (0-1 of expansion)
-  endT: number;            // When effect finishes transitioning (0-1 of expansion)
+  startT: number;          // When effect starts transitioning (0-1 of timeline)
+  endT: number;            // When effect finishes transitioning (0-1 of timeline)
   curvePoints: CurvePoint[];  // Multi-point curve (x=timeline position, y=effect value 0-1)
 }
 
@@ -41,32 +42,40 @@ export interface AnimationConfig {
   effects: Effect[];
 }
 
-// Calculate the current value of an effect based on expansion progress
-// expansionProgress: 0 = fully contracted, 1 = fully expanded
-export function calculateEffectValue(effect: Effect, expansionProgress: number): number {
-  const { startT, endT, min, max, curvePoints, enabled } = effect;
+// Calculate the current value of an effect
+// - For 'state' mode: use expansionProgress (0=contracted, 1=expanded)
+// - For 'animate' mode: use masterProgress (always 0→1 on each trigger)
+export function calculateEffectValue(
+  effect: Effect,
+  expansionProgress: number,
+  masterProgress: number
+): number {
+  const { startT, endT, min, max, curvePoints, enabled, mode } = effect;
+
+  // Choose which progress to use based on mode
+  const progress = mode === 'animate' ? masterProgress : expansionProgress;
 
   // Get start and end values from curve points
   const startValue = curvePoints[0]?.y ?? 0;
   const endValue = curvePoints[curvePoints.length - 1]?.y ?? 1;
 
-  // If disabled, return the value at curve start position (contracted state)
+  // If disabled, return the value at curve start position
   if (!enabled) {
     return min + (max - min) * startValue;
   }
 
   // Before effect's timeline window - stay at start value
-  if (expansionProgress <= startT) {
+  if (progress <= startT) {
     return min + (max - min) * startValue;
   }
 
   // After effect's timeline window - stay at end value
-  if (expansionProgress >= endT) {
+  if (progress >= endT) {
     return min + (max - min) * endValue;
   }
 
   // During effect's timeline window - interpolate using multi-point curve
-  const localProgress = (expansionProgress - startT) / (endT - startT);
+  const localProgress = (progress - startT) / (endT - startT);
   const curveOutput = evaluateCatmullRom(curvePoints, localProgress);
 
   // curveOutput is already in 0-1 effect space, map to min-max
@@ -98,6 +107,7 @@ const defaultAnimConfig: AnimationConfig = {
       id: 'cornerRadius',
       name: 'Corner Roundness',
       enabled: true,
+      mode: 'state',          // Follows expansion state (different when expanded vs contracted)
       min: 0.01,              // Minimum corner radius
       max: 0.15,              // Maximum corner radius
       startT: 0,              // Effect starts at beginning of expansion
@@ -111,6 +121,7 @@ const defaultAnimConfig: AnimationConfig = {
       id: 'focus',
       name: 'Focus',
       enabled: true,
+      mode: 'animate',        // Always plays forward on each trigger
       min: 0,                 // No blur (sharp)
       max: 20,                // Maximum blur amount in pixels
       startT: 0,              // Effect starts at beginning
@@ -236,10 +247,12 @@ export function DigitalMaterialLab() {
         CONTRACTED_SIZE[1] + (EXPANDED_SIZE[1] - CONTRACTED_SIZE[1]) * expansionProgress,
       ];
 
-      // Calculate effect values using expansion progress
+      // Calculate effect values
+      // - State mode effects use expansionProgress (follows state)
+      // - Animate mode effects use masterProgress (always plays forward)
       const cornerRadiusEffect = animConfig.effects.find(e => e.id === 'cornerRadius');
       const rawCornerRadius = cornerRadiusEffect
-        ? calculateEffectValue(cornerRadiusEffect, expansionProgress)
+        ? calculateEffectValue(cornerRadiusEffect, expansionProgress, masterProgress)
         : uniforms.cornerRadius;
 
       // Clamp corner radius to half the shortest edge to prevent pinching
@@ -250,7 +263,7 @@ export function DigitalMaterialLab() {
       // Calculate focus (blur) effect
       const focusEffect = animConfig.effects.find(e => e.id === 'focus');
       const blurAmount = focusEffect
-        ? calculateEffectValue(focusEffect, expansionProgress)
+        ? calculateEffectValue(focusEffect, expansionProgress, masterProgress)
         : 0;
 
       gl.useProgram(program);

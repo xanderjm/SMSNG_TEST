@@ -61,15 +61,14 @@ See ARCHITECTURE.md "GLSL ES Shader Guidelines" for full list.
 
 ### 5. Effect Interface
 
-Effects support multiple variables. Each effect has shared controls (mode, timeline), while each variable has its own min/max and curve:
+Effects have a **single shared curve** that controls all variables. Each variable maps the curve output (0-1) to its own min/max range:
 
 ```typescript
 interface EffectVariable {
   id: string;
   name: string;
-  min: number;
-  max: number;
-  curvePoints: CurvePoint[];
+  min: number;  // Value when curve = 0
+  max: number;  // Value when curve = 1
 }
 
 interface Effect {
@@ -79,7 +78,8 @@ interface Effect {
   mode: 'state' | 'animate';  // state=follows expansion, animate=always forward
   startT: number;
   endT: number;
-  variables: EffectVariable[];  // Each variable has its own min/max and curve
+  curvePoints: CurvePoint[];    // Single shared curve for all variables
+  variables: EffectVariable[];  // Each variable has its own min/max
 }
 
 interface CurvePoint {
@@ -96,9 +96,10 @@ Example: Corner Shape effect with two variables (roundness + squircle):
   id: 'cornerRadius',
   name: 'Corner Shape',
   mode: 'state',
+  curvePoints: [{ x: 0, y: 0 }, { x: 1, y: 1 }],  // Shared curve
   variables: [
-    { id: 'roundness', name: 'Roundness', min: 0.01, max: 0.15, curvePoints: [...] },
-    { id: 'squircle', name: 'Squircle', min: 2.0, max: 6.0, curvePoints: [...] },
+    { id: 'roundness', name: 'Roundness', min: 0.01, max: 0.15 },
+    { id: 'squircle', name: 'Squircle', min: 2.0, max: 5.0 },
   ],
 }
 ```

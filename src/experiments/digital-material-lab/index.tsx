@@ -8,17 +8,15 @@ import type { CurvePoint } from './MultiPointCurveEditor';
 import { evaluateCatmullRom } from './MultiPointCurveEditor';
 import { vertexShaderSource, fragmentShaderSource } from './shaders';
 
-// Variable definition - each effect can have multiple animated variables
+// Variable definition - each variable maps the shared curve to its own min/max range
 export interface EffectVariable {
   id: string;
   name: string;
-  min: number;             // Minimum possible value (absolute)
-  max: number;             // Maximum possible value (absolute)
-  curvePoints: CurvePoint[];  // Multi-point curve (x=timeline position, y=effect value 0-1)
+  min: number;             // Value when curve = 0
+  max: number;             // Value when curve = 1
 }
 
-// Effect definition - the basis for all animated effects
-// Effects use multi-point curves to define how variables change during expansion
+// Effect definition - single curve shared by all variables
 export interface Effect {
   id: string;
   name: string;
@@ -26,7 +24,8 @@ export interface Effect {
   mode: 'state' | 'animate';  // 'state' = follows expansion state, 'animate' = always plays forward
   startT: number;          // When effect starts transitioning (0-1 of timeline)
   endT: number;            // When effect finishes transitioning (0-1 of timeline)
-  variables: EffectVariable[];  // Each variable has its own min/max and curve
+  curvePoints: CurvePoint[];  // Single shared curve (all variables use this)
+  variables: EffectVariable[];  // Each variable has its own min/max
 }
 
 export interface MaterialUniforms {
@@ -50,6 +49,7 @@ export interface AnimationConfig {
 }
 
 // Calculate the current value of a specific variable within an effect
+// All variables share the same curve - the curve output (0-1) maps to each variable's min/max
 // - For 'state' mode: use expansionProgress (0=contracted, 1=expanded)
 // - For 'animate' mode: use masterProgress (always 0→1 on each trigger)
 export function calculateVariableValue(
@@ -58,18 +58,18 @@ export function calculateVariableValue(
   expansionProgress: number,
   masterProgress: number
 ): number {
-  const { startT, endT, enabled, mode, variables } = effect;
+  const { startT, endT, enabled, mode, curvePoints, variables } = effect;
 
   // Find the variable
   const variable = variables.find(v => v.id === variableId);
   if (!variable) return 0;
 
-  const { min, max, curvePoints } = variable;
+  const { min, max } = variable;
 
   // Choose which progress to use based on mode
   const progress = mode === 'animate' ? masterProgress : expansionProgress;
 
-  // Get start and end values from curve points
+  // Get start and end values from the SHARED curve points
   const startValue = curvePoints[0]?.y ?? 0;
   const endValue = curvePoints[curvePoints.length - 1]?.y ?? 1;
 
@@ -88,11 +88,11 @@ export function calculateVariableValue(
     return min + (max - min) * endValue;
   }
 
-  // During effect's timeline window - interpolate using multi-point curve
+  // During effect's timeline window - interpolate using shared multi-point curve
   const localProgress = (progress - startT) / (endT - startT);
   const curveOutput = evaluateCatmullRom(curvePoints, localProgress);
 
-  // curveOutput is already in 0-1 effect space, map to min-max
+  // curveOutput is 0-1, map to this variable's min-max range
   return min + (max - min) * curveOutput;
 }
 
@@ -124,26 +124,22 @@ const defaultAnimConfig: AnimationConfig = {
       mode: 'state',          // Follows expansion state (different when expanded vs contracted)
       startT: 0,              // Effect starts at beginning of expansion
       endT: 1,                // Effect ends at full expansion
+      curvePoints: [          // Single shared curve for all variables
+        { x: 0, y: 0 },       // Start: contracted state (curve = 0)
+        { x: 1, y: 1 },       // End: expanded state (curve = 1)
+      ],
       variables: [
         {
           id: 'roundness',
           name: 'Roundness',
-          min: 0.01,            // Minimum corner radius
-          max: 0.15,            // Maximum corner radius
-          curvePoints: [        // Multi-point curve (add points by double-clicking)
-            { x: 0, y: 0 },     // Start: contracted state (min value)
-            { x: 1, y: 1 },     // End: expanded state (max value)
-          ],
+          min: 0.01,            // Value at curve=0 (contracted)
+          max: 0.15,            // Value at curve=1 (expanded)
         },
         {
           id: 'squircle',
           name: 'Squircle',
-          min: 2.0,             // 2.0 = standard circle/rounded corners
-          max: 6.0,             // Higher = more iOS-style squircle
-          curvePoints: [
-            { x: 0, y: 0 },     // Start: standard rounded (n=2)
-            { x: 1, y: 0 },     // End: standard rounded (no squircle by default)
-          ],
+          min: 2.0,             // Value at curve=0: standard circle (n=2)
+          max: 5.0,             // Value at curve=1: iOS-style squircle (n=5)
         },
       ],
     },
@@ -154,16 +150,16 @@ const defaultAnimConfig: AnimationConfig = {
       mode: 'animate',        // Always plays forward on each trigger
       startT: 0,              // Effect starts at beginning
       endT: 1,                // Effect ends at full expansion
+      curvePoints: [          // Single curve for blur effect
+        { x: 0, y: 1 },       // Start: curve=1 (max blur)
+        { x: 1, y: 0 },       // End: curve=0 (no blur)
+      ],
       variables: [
         {
           id: 'amount',
           name: 'Blur Amount',
           min: 0,               // No blur (sharp)
           max: 20,              // Maximum blur amount in pixels
-          curvePoints: [
-            { x: 0, y: 1 },     // Start: blurred (out of focus)
-            { x: 1, y: 0 },     // End: sharp (in focus)
-          ],
         },
       ],
     },

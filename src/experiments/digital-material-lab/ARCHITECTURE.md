@@ -19,19 +19,18 @@ const expansionProgress = isExpanded ? masterProgress : (1 - masterProgress);
 
 ### Effect Interface
 
-Effects support multiple animated variables. Each effect has shared controls (mode, timeline), while each variable has its own min/max range and curve:
+Effects have a **single shared curve** that drives all variables. Each variable maps the curve output (0-1) to its own min/max range:
 
 ```typescript
-// Variable definition - each effect can have multiple animated variables
+// Variable definition - maps shared curve to a specific value range
 interface EffectVariable {
   id: string;                    // Unique identifier within effect
   name: string;                  // Display name in UI
-  min: number;                   // Minimum possible value (absolute)
-  max: number;                   // Maximum possible value (absolute)
-  curvePoints: CurvePoint[];     // Multi-point bezier curve for this variable
+  min: number;                   // Value when curve = 0
+  max: number;                   // Value when curve = 1
 }
 
-// Effect definition - container for one or more animated variables
+// Effect definition - single curve shared by all variables
 interface Effect {
   id: string;                    // Unique identifier
   name: string;                  // Display name in UI
@@ -39,12 +38,13 @@ interface Effect {
   mode: 'state' | 'animate';     // Animation mode (see below)
   startT: number;                // When effect starts (0-1 of timeline)
   endT: number;                  // When effect ends (0-1 of timeline)
-  variables: EffectVariable[];   // Each variable has its own min/max and curve
+  curvePoints: CurvePoint[];     // Single shared curve (all variables use this)
+  variables: EffectVariable[];   // Each variable has its own min/max
 }
 
 interface CurvePoint {
   x: number;  // 0-1 position on timeline
-  y: number;  // 0-1 effect value (maps to min-max range)
+  y: number;  // 0-1 effect value (maps to each variable's min-max range)
   // Bezier handle offsets (relative to point position)
   handleIn?: { x: number; y: number };   // Control handle coming in (from left)
   handleOut?: { x: number; y: number };  // Control handle going out (to right)
@@ -103,7 +103,7 @@ Effects have two modes that control how the animation curve is played:
 
 ### Example: Corner Shape Effect (State Mode, Multiple Variables)
 
-The corner shape effect has two variables: roundness and squircle. They share the same timeline and mode but each has its own min/max and curve:
+The corner shape effect has two variables (roundness and squircle) that share a single curve. The curve controls both variables simultaneously, each mapping to its own min/max:
 
 ```typescript
 {
@@ -113,35 +113,31 @@ The corner shape effect has two variables: roundness and squircle. They share th
   mode: 'state',       // Different values when expanded vs contracted
   startT: 0,           // Start transitioning immediately
   endT: 1,             // Finish at full expansion
+  curvePoints: [       // Single shared curve
+    { x: 0, y: 0 },    // Contracted: curve = 0 (both vars at min)
+    { x: 1, y: 1 },    // Expanded: curve = 1 (both vars at max)
+  ],
   variables: [
     {
       id: 'roundness',
       name: 'Roundness',
-      min: 0.01,           // Minimum corner radius
-      max: 0.15,           // Maximum corner radius
-      curvePoints: [
-        { x: 0, y: 0 },    // Contracted: min value (sharp corners)
-        { x: 1, y: 1 },    // Expanded: max value (rounded corners)
-      ],
+      min: 0.01,           // Value when curve = 0
+      max: 0.15,           // Value when curve = 1
     },
     {
       id: 'squircle',
       name: 'Squircle',
-      min: 2.0,            // 2.0 = standard circle/rounded corners
-      max: 6.0,            // Higher = more iOS-style squircle
-      curvePoints: [
-        { x: 0, y: 0 },    // Contracted: standard rounded (n=2)
-        { x: 1, y: 0.5 },  // Expanded: moderate squircle (n=4)
-      ],
+      min: 2.0,            // Value when curve = 0 (standard circle)
+      max: 5.0,            // Value when curve = 1 (iOS-style squircle)
     },
   ],
 }
 ```
 
-**Squircle Explained**: The squircle parameter controls the superellipse exponent (n):
-- `n = 2.0`: Standard circle/ellipse corners
-- `n = 4.0-5.0`: iOS-style squircle (smooth, squared corners)
-- `n = 6.0+`: Very square but still smooth
+**Squircle Explained**: The squircle parameter controls the superellipse exponent (n) for corner curves:
+- `n = 2.0`: Standard circular corners (like regular rounded rect)
+- `n = 4.0-5.0`: iOS-style squircle (smoother, more continuous corners)
+- `n > 6.0`: Very squared corners but still smooth
 
 ### Example: Focus Effect (Animate Mode, Single Variable)
 
@@ -153,16 +149,16 @@ The corner shape effect has two variables: roundness and squircle. They share th
   mode: 'animate',     // Always plays forward on each trigger
   startT: 0,
   endT: 1,
+  curvePoints: [       // Curve goes 1 → 0 (blur to sharp)
+    { x: 0, y: 1 },    // Start: curve = 1 (max blur)
+    { x: 1, y: 0 },    // End: curve = 0 (no blur)
+  ],
   variables: [
     {
       id: 'amount',
       name: 'Blur Amount',
-      min: 0,              // Sharp (no blur)
-      max: 20,             // Maximum blur
-      curvePoints: [
-        { x: 0, y: 1 },    // Start blurred
-        { x: 1, y: 0 },    // End sharp
-      ],
+      min: 0,              // Value when curve = 0 (sharp)
+      max: 20,             // Value when curve = 1 (blurred)
     },
   ],
 }
@@ -178,17 +174,17 @@ The corner shape effect has two variables: roundness and squircle. They share th
   mode: 'animate',     // One-shot animation
   startT: 0,
   endT: 1,
+  curvePoints: [       // Parabolic curve (0 → peak → 0)
+    { x: 0, y: 0 },     // Start at 0
+    { x: 0.5, y: 0.8 }, // Peak at 80% in the middle
+    { x: 1, y: 0 },     // Return to 0
+  ],
   variables: [
     {
       id: 'intensity',
       name: 'Intensity',
       min: 0,
       max: 1,
-      curvePoints: [
-        { x: 0, y: 0 },     // Start at 0
-        { x: 0.5, y: 0.8 }, // Peak at 80% in the middle
-        { x: 1, y: 0 },     // Return to 0
-      ],
     },
   ],
 }
@@ -210,18 +206,14 @@ const defaultAnimConfig: AnimationConfig = {
       mode: 'state',        // or 'animate' for one-shot effects
       startT: 0,
       endT: 1,
+      curvePoints: [        // Single shared curve
+        { x: 0, y: 0 },
+        { x: 1, y: 1 },
+      ],
       variables: [
-        {
-          id: 'primary',
-          name: 'Primary Value',
-          min: 0,
-          max: 1,
-          curvePoints: [
-            { x: 0, y: 0 },
-            { x: 1, y: 1 },
-          ],
-        },
-        // Add more variables as needed
+        { id: 'primary', name: 'Primary Value', min: 0, max: 1 },
+        { id: 'secondary', name: 'Secondary Value', min: 0, max: 100 },
+        // Add more variables as needed - all share the same curve
       ],
     },
   ],

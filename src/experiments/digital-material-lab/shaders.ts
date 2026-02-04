@@ -41,41 +41,35 @@ export const fragmentShaderSource = `
   uniform float u_momentum;
   uniform float u_gravAttention;
 
-  // Signed Distance Function for rounded box (standard rounded corners)
-  float sdRoundedBox(vec2 p, vec2 b, float r) {
+  // Signed Distance Function for squircle-aware rounded box
+  // r = corner radius, n = squircle exponent (2.0 = circle, >2 = squircle)
+  // The squircle parameter controls the corner curve shape:
+  //   n=2: standard circular corners (like regular rounded rect)
+  //   n=4-5: iOS-style squircle corners (smoother, more continuous)
+  //   n>6: very squared corners but still smooth
+  float sdSquircleBox(vec2 p, vec2 b, float r, float n) {
+    // Get distance to inner box (the box minus the corner radius)
     vec2 q = abs(p) - b + r;
-    return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - r;
-  }
 
-  // Signed Distance Function for superellipse/squircle
-  // n = 2.0 gives standard ellipse, n > 2 gives squircle (iOS-style corners)
-  float sdSuperellipse(vec2 p, vec2 b, float n) {
-    // Normalize position by size
-    vec2 pn = abs(p) / b;
-    // Superellipse formula: |x/a|^n + |y/b|^n = 1
-    float d = pow(pow(pn.x, n) + pow(pn.y, n), 1.0 / n);
-    // Convert to signed distance (inside = negative, outside = positive)
-    return (d - 1.0) * min(b.x, b.y);
+    // If we're in the corner region (both q.x and q.y are positive)
+    if (q.x > 0.0 && q.y > 0.0) {
+      // Use superellipse formula for corner distance
+      // Normalize by radius to work in unit space
+      vec2 qn = q / r;
+      // Superellipse distance: (|x|^n + |y|^n)^(1/n)
+      // For n=2 this equals length(qn), giving circular corners
+      // For n>2 this gives squircle (squashed circle) corners
+      float superDist = pow(pow(qn.x, n) + pow(qn.y, n), 1.0 / n);
+      return (superDist - 1.0) * r;
+    }
+
+    // Not in corner region - use standard box distance
+    return min(max(q.x, q.y), 0.0);
   }
 
   // Calculate fill value for a given UV position
-  // Blends between rounded box and squircle based on u_squircle
   float getFill(vec2 uv, float edge) {
-    // When squircle is close to 2.0, use rounded box for better corner radius control
-    // As squircle increases, blend toward superellipse for iOS-style corners
-    float squircleBlend = smoothstep(2.0, 3.0, u_squircle);
-
-    // Rounded box SDF (for standard rounded corners)
-    float dBox = sdRoundedBox(uv, u_rectSize, u_cornerRadius);
-
-    // Superellipse SDF (for squircle corners)
-    // Adjust size to account for corner radius visual equivalence
-    vec2 squircleSize = u_rectSize - u_cornerRadius * 0.3 * squircleBlend;
-    float dSquircle = sdSuperellipse(uv, squircleSize, u_squircle);
-
-    // Blend between the two based on squircle amount
-    float d = mix(dBox, dSquircle, squircleBlend);
-
+    float d = sdSquircleBox(uv, u_rectSize, u_cornerRadius, u_squircle);
     return 1.0 - smoothstep(-edge, edge, d);
   }
 

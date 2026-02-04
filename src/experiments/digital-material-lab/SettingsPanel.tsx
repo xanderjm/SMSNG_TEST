@@ -156,81 +156,51 @@ function TimelineRange({ startT, endT, onStartChange, onEndChange }: TimelineRan
   );
 }
 
-// Editor for a single variable within an effect
-interface VariableEditorProps {
+// Inline editor for a variable's min/max range (no curve - uses shared curve)
+interface VariableRangeProps {
   variable: EffectVariable;
+  curveStart: number;  // Y value at curve start (0-1)
+  curveEnd: number;    // Y value at curve end (0-1)
   onChange: (variable: EffectVariable) => void;
-  isExpanded: boolean;
-  onToggleExpand: () => void;
 }
 
-function VariableEditor({ variable, onChange, isExpanded, onToggleExpand }: VariableEditorProps) {
-  // Calculate actual values at start/end of curve
-  const startValue = variable.curvePoints[0]?.y ?? 0;
-  const endValue = variable.curvePoints[variable.curvePoints.length - 1]?.y ?? 1;
-  const startVal = variable.min + (variable.max - variable.min) * startValue;
-  const endVal = variable.min + (variable.max - variable.min) * endValue;
+function VariableRange({ variable, curveStart, curveEnd, onChange }: VariableRangeProps) {
+  // Calculate actual values at start/end based on shared curve
+  const startVal = variable.min + (variable.max - variable.min) * curveStart;
+  const endVal = variable.min + (variable.max - variable.min) * curveEnd;
 
   return (
-    <div className="bg-neutral-800/30 rounded-lg p-3 mt-3">
-      {/* Variable Header */}
-      <button
-        onClick={onToggleExpand}
-        className="w-full flex items-center justify-between text-[11px] font-medium text-neutral-300 hover:text-neutral-200 transition-colors"
-      >
-        <span>{variable.name}</span>
-        {isExpanded ? (
-          <ChevronDown className="w-3.5 h-3.5" />
-        ) : (
-          <ChevronRight className="w-3.5 h-3.5" />
-        )}
-      </button>
-
-      {isExpanded && (
-        <div className="mt-3">
-          {/* Min/Max Range */}
-          <div className="grid grid-cols-2 gap-3 mb-3">
-            <div>
-              <label className="text-[9px] text-neutral-500 uppercase tracking-wider block mb-1">Min</label>
-              <input
-                type="number"
-                step={0.001}
-                value={variable.min}
-                onChange={(e) => onChange({ ...variable, min: parseFloat(e.target.value) || 0 })}
-                className="w-full px-2.5 py-2 bg-neutral-800 border border-neutral-700 rounded text-xs text-neutral-200 font-mono focus:outline-none focus:border-neutral-500"
-              />
-            </div>
-            <div>
-              <label className="text-[9px] text-neutral-500 uppercase tracking-wider block mb-1">Max</label>
-              <input
-                type="number"
-                step={0.001}
-                value={variable.max}
-                onChange={(e) => onChange({ ...variable, max: parseFloat(e.target.value) || 0 })}
-                className="w-full px-2.5 py-2 bg-neutral-800 border border-neutral-700 rounded text-xs text-neutral-200 font-mono focus:outline-none focus:border-neutral-500"
-              />
-            </div>
-          </div>
-
-          {/* Current Values */}
-          <div className="mb-3 flex justify-between text-[9px] font-mono bg-neutral-900/50 rounded px-2.5 py-1.5">
-            <span className="text-emerald-400">
-              Start: {startVal.toFixed(3)}
-            </span>
-            <span className="text-rose-400">
-              End: {endVal.toFixed(3)}
-            </span>
-          </div>
-
-          {/* Curve Editor */}
-          <MultiPointCurveEditor
-            points={variable.curvePoints}
-            onChange={(curvePoints) => onChange({ ...variable, curvePoints })}
-            width={230}
-            height={120}
+    <div className="bg-neutral-800/30 rounded-lg p-3 mt-2">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-[11px] font-medium text-neutral-300">{variable.name}</span>
+        <span className="text-[9px] font-mono text-neutral-500">
+          <span className="text-emerald-400">{startVal.toFixed(2)}</span>
+          {' → '}
+          <span className="text-rose-400">{endVal.toFixed(2)}</span>
+        </span>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className="text-[9px] text-neutral-500 uppercase tracking-wider block mb-1">Min</label>
+          <input
+            type="number"
+            step={0.01}
+            value={variable.min}
+            onChange={(e) => onChange({ ...variable, min: parseFloat(e.target.value) || 0 })}
+            className="w-full px-2 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-xs text-neutral-200 font-mono focus:outline-none focus:border-neutral-500"
           />
         </div>
-      )}
+        <div>
+          <label className="text-[9px] text-neutral-500 uppercase tracking-wider block mb-1">Max</label>
+          <input
+            type="number"
+            step={0.01}
+            value={variable.max}
+            onChange={(e) => onChange({ ...variable, max: parseFloat(e.target.value) || 0 })}
+            className="w-full px-2 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-xs text-neutral-200 font-mono focus:outline-none focus:border-neutral-500"
+          />
+        </div>
+      </div>
     </div>
   );
 }
@@ -241,18 +211,7 @@ interface EffectEditorProps {
 }
 
 function EffectEditor({ effect, onChange }: EffectEditorProps) {
-  // Track which variables are expanded (first one expanded by default)
-  const [expandedVars, setExpandedVars] = useState<Record<string, boolean>>(() => {
-    const initial: Record<string, boolean> = {};
-    effect.variables.forEach((v, i) => {
-      initial[v.id] = i === 0; // First variable expanded by default
-    });
-    return initial;
-  });
-
-  const toggleVarExpand = (varId: string) => {
-    setExpandedVars(prev => ({ ...prev, [varId]: !prev[varId] }));
-  };
+  const [showCurve, setShowCurve] = useState(true);
 
   const updateVariable = (variableId: string, updatedVariable: EffectVariable) => {
     const newVariables = effect.variables.map(v =>
@@ -260,6 +219,10 @@ function EffectEditor({ effect, onChange }: EffectEditorProps) {
     );
     onChange({ ...effect, variables: newVariables });
   };
+
+  // Get curve start/end Y values for variable display
+  const curveStart = effect.curvePoints[0]?.y ?? 0;
+  const curveEnd = effect.curvePoints[effect.curvePoints.length - 1]?.y ?? 1;
 
   return (
     <div className="bg-neutral-800/50 rounded-lg p-4">
@@ -322,16 +285,42 @@ function EffectEditor({ effect, onChange }: EffectEditorProps) {
             onEndChange={(v) => onChange({ ...effect, endT: v })}
           />
 
-          {/* Variables Section */}
+          {/* Shared Curve Editor */}
+          <div className="border-t border-neutral-700 pt-4 mt-4">
+            <button
+              onClick={() => setShowCurve(!showCurve)}
+              className="w-full flex items-center justify-between py-1 text-[11px] font-medium text-neutral-400 hover:text-neutral-300 transition-colors"
+            >
+              <span>Curve</span>
+              {showCurve ? (
+                <ChevronDown className="w-3.5 h-3.5" />
+              ) : (
+                <ChevronRight className="w-3.5 h-3.5" />
+              )}
+            </button>
+
+            {showCurve && (
+              <div className="mt-3">
+                <MultiPointCurveEditor
+                  points={effect.curvePoints}
+                  onChange={(curvePoints) => onChange({ ...effect, curvePoints })}
+                  width={260}
+                  height={140}
+                />
+              </div>
+            )}
+          </div>
+
+          {/* Variables Section - min/max only, uses shared curve */}
           <div className="border-t border-neutral-700 pt-4 mt-4">
             <span className="text-[11px] font-medium text-neutral-400 block mb-1">Variables</span>
             {effect.variables.map((variable) => (
-              <VariableEditor
+              <VariableRange
                 key={variable.id}
                 variable={variable}
+                curveStart={curveStart}
+                curveEnd={curveEnd}
                 onChange={(updated) => updateVariable(variable.id, updated)}
-                isExpanded={expandedVars[variable.id] ?? false}
-                onToggleExpand={() => toggleVarExpand(variable.id)}
               />
             ))}
           </div>

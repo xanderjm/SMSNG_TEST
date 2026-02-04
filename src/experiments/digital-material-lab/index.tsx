@@ -530,6 +530,12 @@ export function DigitalMaterialLab() {
       // Calculate effect values
       // - State mode effects use expansionProgress (follows state)
       // - Animate mode effects use masterProgress (always plays forward)
+      //
+      // TODO: When adding more visual/compositing effects, refactor to iterate
+      // through animConfig.effects in order rather than finding by ID. The UI
+      // already supports drag-to-reorder, but rendering currently ignores order.
+      // For order-dependent effects (e.g., glow on top of trail vs trail on top
+      // of glow), process effects sequentially from the array.
       const cornerRadiusEffect = animConfig.effects.find(e => e.id === 'cornerRadius');
 
       // Corner shape: roundness and squircle

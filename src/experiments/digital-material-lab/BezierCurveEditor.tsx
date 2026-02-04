@@ -4,6 +4,11 @@ import type { BezierCurve } from './animation';
 interface BezierCurveEditorProps {
   value: BezierCurve;
   onChange: (value: BezierCurve) => void;
+  // Optional: allow start/end Y points to be adjustable
+  curveStart?: number;
+  curveEnd?: number;
+  onCurveStartChange?: (value: number) => void;
+  onCurveEndChange?: (value: number) => void;
   width?: number;
   height?: number;
 }
@@ -11,11 +16,17 @@ interface BezierCurveEditorProps {
 export function BezierCurveEditor({
   value,
   onChange,
+  curveStart,
+  curveEnd,
+  onCurveStartChange,
+  onCurveEndChange,
   width = 200,
   height = 120,
 }: BezierCurveEditorProps) {
   const svgRef = useRef<SVGSVGElement>(null);
-  const [dragging, setDragging] = useState<'p1' | 'p2' | null>(null);
+  const [dragging, setDragging] = useState<'p0' | 'p1' | 'p2' | 'p3' | null>(null);
+
+  const hasAdjustableEndpoints = curveStart !== undefined && curveEnd !== undefined;
 
   const padding = 16;
   const innerWidth = width - padding * 2;
@@ -23,6 +34,10 @@ export function BezierCurveEditor({
 
   // Control points in normalized space (0-1)
   const [x1, y1, x2, y2] = value;
+
+  // Start and end Y values (0 and 1 if not adjustable)
+  const startY = curveStart ?? 0;
+  const endY = curveEnd ?? 1;
 
   // Convert to SVG coordinates
   const toSvgX = (x: number) => padding + x * innerWidth;
@@ -32,21 +47,21 @@ export function BezierCurveEditor({
   const fromSvgX = (svgX: number) => Math.max(0, Math.min(1, (svgX - padding) / innerWidth));
   const fromSvgY = (svgY: number) => Math.max(0, Math.min(1, 1 - (svgY - padding) / innerHeight));
 
-  // Fixed start and end points
-  const p0 = { x: toSvgX(0), y: toSvgY(0) };
-  const p3 = { x: toSvgX(1), y: toSvgY(1) };
-
-  // Control point positions
+  // Points in SVG space
+  const p0 = { x: toSvgX(0), y: toSvgY(startY) };
+  const p3 = { x: toSvgX(1), y: toSvgY(endY) };
   const p1 = { x: toSvgX(x1), y: toSvgY(y1) };
   const p2 = { x: toSvgX(x2), y: toSvgY(y2) };
 
   // Generate the bezier path
   const pathD = `M ${p0.x} ${p0.y} C ${p1.x} ${p1.y}, ${p2.x} ${p2.y}, ${p3.x} ${p3.y}`;
 
-  const handleMouseDown = useCallback((point: 'p1' | 'p2') => (e: React.MouseEvent) => {
+  const handleMouseDown = useCallback((point: 'p0' | 'p1' | 'p2' | 'p3') => (e: React.MouseEvent) => {
     e.preventDefault();
+    // Only allow p0/p3 dragging if endpoints are adjustable
+    if ((point === 'p0' || point === 'p3') && !hasAdjustableEndpoints) return;
     setDragging(point);
-  }, []);
+  }, [hasAdjustableEndpoints]);
 
   const handleMouseMove = useCallback((e: MouseEvent) => {
     if (!dragging || !svgRef.current) return;
@@ -58,12 +73,16 @@ export function BezierCurveEditor({
     const x = fromSvgX(svgX);
     const y = fromSvgY(svgY);
 
-    if (dragging === 'p1') {
+    if (dragging === 'p0' && onCurveStartChange) {
+      onCurveStartChange(y);
+    } else if (dragging === 'p3' && onCurveEndChange) {
+      onCurveEndChange(y);
+    } else if (dragging === 'p1') {
       onChange([x, y, x2, y2]);
-    } else {
+    } else if (dragging === 'p2') {
       onChange([x1, y1, x, y]);
     }
-  }, [dragging, onChange, x1, y1, x2, y2]);
+  }, [dragging, onChange, onCurveStartChange, onCurveEndChange, x1, y1, x2, y2]);
 
   const handleMouseUp = useCallback(() => {
     setDragging(null);
@@ -79,16 +98,6 @@ export function BezierCurveEditor({
       };
     }
   }, [dragging, handleMouseMove, handleMouseUp]);
-
-  // Generate sample points for the curve visualization
-  const samplePoints: string[] = [];
-  for (let t = 0; t <= 1; t += 0.02) {
-    // De Casteljau's algorithm
-    const mt = 1 - t;
-    const x = mt * mt * mt * 0 + 3 * mt * mt * t * x1 + 3 * mt * t * t * x2 + t * t * t * 1;
-    const y = mt * mt * mt * 0 + 3 * mt * mt * t * y1 + 3 * mt * t * t * y2 + t * t * t * 1;
-    samplePoints.push(`${toSvgX(x)},${toSvgY(y)}`);
-  }
 
   return (
     <div className="relative">
@@ -125,7 +134,7 @@ export function BezierCurveEditor({
           fill="url(#grid)"
         />
 
-        {/* Diagonal reference line */}
+        {/* Diagonal reference line (from startY to endY) */}
         <line
           x1={p0.x}
           y1={p0.y}
@@ -135,6 +144,32 @@ export function BezierCurveEditor({
           strokeWidth="1"
           strokeDasharray="4 4"
         />
+
+        {/* Horizontal reference lines for adjustable endpoints */}
+        {hasAdjustableEndpoints && (
+          <>
+            <line
+              x1={padding}
+              y1={p0.y}
+              x2={padding + innerWidth}
+              y2={p0.y}
+              stroke="#10b981"
+              strokeWidth="1"
+              strokeDasharray="2 2"
+              opacity="0.3"
+            />
+            <line
+              x1={padding}
+              y1={p3.y}
+              x2={padding + innerWidth}
+              y2={p3.y}
+              stroke="#f43f5e"
+              strokeWidth="1"
+              strokeDasharray="2 2"
+              opacity="0.3"
+            />
+          </>
+        )}
 
         {/* Control handles */}
         <line
@@ -165,24 +200,28 @@ export function BezierCurveEditor({
           strokeLinecap="round"
         />
 
-        {/* Start point */}
+        {/* Start point (P0) - draggable if adjustable */}
         <circle
           cx={p0.x}
           cy={p0.y}
-          r="4"
-          fill="#1a1a24"
-          stroke="#6366f1"
+          r={hasAdjustableEndpoints ? 6 : 4}
+          fill={hasAdjustableEndpoints ? '#10b981' : '#1a1a24'}
+          stroke={hasAdjustableEndpoints ? '#fff' : '#6366f1'}
           strokeWidth="2"
+          style={{ cursor: hasAdjustableEndpoints ? 'ns-resize' : 'default' }}
+          onMouseDown={handleMouseDown('p0')}
         />
 
-        {/* End point */}
+        {/* End point (P3) - draggable if adjustable */}
         <circle
           cx={p3.x}
           cy={p3.y}
-          r="4"
-          fill="#1a1a24"
-          stroke="#6366f1"
+          r={hasAdjustableEndpoints ? 6 : 4}
+          fill={hasAdjustableEndpoints ? '#f43f5e' : '#1a1a24'}
+          stroke={hasAdjustableEndpoints ? '#fff' : '#6366f1'}
           strokeWidth="2"
+          style={{ cursor: hasAdjustableEndpoints ? 'ns-resize' : 'default' }}
+          onMouseDown={handleMouseDown('p3')}
         />
 
         {/* Control point P1 */}
@@ -211,9 +250,18 @@ export function BezierCurveEditor({
       </svg>
 
       {/* Numeric values */}
-      <div className="flex justify-between mt-2 text-[10px] text-gray-500 font-mono">
-        <span>({x1.toFixed(2)}, {y1.toFixed(2)})</span>
-        <span>({x2.toFixed(2)}, {y2.toFixed(2)})</span>
+      <div className="flex justify-between mt-2 text-[10px] font-mono">
+        {hasAdjustableEndpoints ? (
+          <>
+            <span className="text-emerald-400">Start: {startY.toFixed(2)}</span>
+            <span className="text-rose-400">End: {endY.toFixed(2)}</span>
+          </>
+        ) : (
+          <>
+            <span className="text-gray-500">({x1.toFixed(2)}, {y1.toFixed(2)})</span>
+            <span className="text-gray-500">({x2.toFixed(2)}, {y2.toFixed(2)})</span>
+          </>
+        )}
       </div>
     </div>
   );

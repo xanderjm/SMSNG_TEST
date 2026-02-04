@@ -44,65 +44,6 @@ function Slider({ label, value, min, max, step = 0.01, onChange, unit = '' }: Sl
   );
 }
 
-interface DualRangeSliderProps {
-  label: string;
-  startValue: number;
-  endValue: number;
-  min: number;
-  max: number;
-  step?: number;
-  onStartChange: (value: number) => void;
-  onEndChange: (value: number) => void;
-}
-
-function DualRangeSlider({
-  label,
-  startValue,
-  endValue,
-  min,
-  max,
-  step = 0.01,
-  onStartChange,
-  onEndChange
-}: DualRangeSliderProps) {
-  return (
-    <div className="mb-3">
-      <div className="flex justify-between items-center mb-1">
-        <span className="text-xs text-gray-400">{label}</span>
-        <span className="text-xs text-gray-500 font-mono">
-          {startValue.toFixed(2)} → {endValue.toFixed(2)}
-        </span>
-      </div>
-      <div className="space-y-1">
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] text-gray-500 w-8">Start</span>
-          <input
-            type="range"
-            min={min}
-            max={max}
-            step={step}
-            value={startValue}
-            onChange={(e) => onStartChange(parseFloat(e.target.value))}
-            className="flex-1 h-1.5 bg-[#2a2a3e] rounded-lg appearance-none cursor-pointer accent-emerald-500"
-          />
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] text-gray-500 w-8">End</span>
-          <input
-            type="range"
-            min={min}
-            max={max}
-            step={step}
-            value={endValue}
-            onChange={(e) => onEndChange(parseFloat(e.target.value))}
-            className="flex-1 h-1.5 bg-[#2a2a3e] rounded-lg appearance-none cursor-pointer accent-rose-500"
-          />
-        </div>
-      </div>
-    </div>
-  );
-}
-
 interface TimelineRangeProps {
   startT: number;
   endT: number;
@@ -132,12 +73,12 @@ function TimelineRange({ startT, endT, onStartChange, onEndChange }: TimelineRan
         />
         {/* Start marker */}
         <div
-          className="absolute top-0 bottom-0 w-1 bg-emerald-500 rounded cursor-ew-resize"
+          className="absolute top-0 bottom-0 w-1 bg-emerald-500 rounded"
           style={{ left: `calc(${startT * 100}% - 2px)` }}
         />
         {/* End marker */}
         <div
-          className="absolute top-0 bottom-0 w-1 bg-rose-500 rounded cursor-ew-resize"
+          className="absolute top-0 bottom-0 w-1 bg-rose-500 rounded"
           style={{ left: `calc(${endT * 100}% - 2px)` }}
         />
       </div>
@@ -181,20 +122,21 @@ function TimelineRange({ startT, endT, onStartChange, onEndChange }: TimelineRan
 interface EffectEditorProps {
   effect: Effect;
   onChange: (effect: Effect) => void;
-  valueMin: number;
-  valueMax: number;
-  valueStep?: number;
 }
 
-function EffectEditor({ effect, onChange, valueMin, valueMax, valueStep = 0.001 }: EffectEditorProps) {
-  const [showCurve, setShowCurve] = useState(false);
+function EffectEditor({ effect, onChange }: EffectEditorProps) {
+  const [showCurve, setShowCurve] = useState(true);
 
   const curvePresets: { name: string; curve: BezierCurve }[] = [
+    { name: 'linear', curve: CURVES.linear },
     { name: 'ease', curve: CURVES.ease },
     { name: 'ease-out', curve: CURVES.easeOut },
     { name: 'elastic', curve: CURVES.elastic },
-    { name: 'linear', curve: CURVES.linear },
   ];
+
+  // Calculate current value display (for reference)
+  const currentStartVal = effect.min + (effect.max - effect.min) * effect.curveStart;
+  const currentEndVal = effect.min + (effect.max - effect.min) * effect.curveEnd;
 
   return (
     <div className="bg-[#1a1a24] rounded-lg p-3 border border-[#2a2a3e]">
@@ -215,17 +157,45 @@ function EffectEditor({ effect, onChange, valueMin, valueMax, valueStep = 0.001 
 
       {effect.enabled && (
         <>
-          {/* Start/End Values */}
-          <DualRangeSlider
-            label="Value"
-            startValue={effect.startValue}
-            endValue={effect.endValue}
-            min={valueMin}
-            max={valueMax}
-            step={valueStep}
-            onStartChange={(v) => onChange({ ...effect, startValue: v })}
-            onEndChange={(v) => onChange({ ...effect, endValue: v })}
-          />
+          {/* Min/Max Range */}
+          <div className="mb-3">
+            <div className="flex justify-between items-center mb-1">
+              <span className="text-xs text-gray-400">Effect Range</span>
+              <span className="text-xs text-gray-500 font-mono">
+                {effect.min.toFixed(3)} - {effect.max.toFixed(3)}
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <span className="text-[10px] text-gray-500">Min</span>
+                <input
+                  type="number"
+                  step={0.001}
+                  value={effect.min}
+                  onChange={(e) => onChange({ ...effect, min: parseFloat(e.target.value) || 0 })}
+                  className="w-full px-2 py-1 bg-[#2a2a3e] rounded text-xs text-gray-300 font-mono"
+                />
+              </div>
+              <div>
+                <span className="text-[10px] text-gray-500">Max</span>
+                <input
+                  type="number"
+                  step={0.001}
+                  value={effect.max}
+                  onChange={(e) => onChange({ ...effect, max: parseFloat(e.target.value) || 0 })}
+                  className="w-full px-2 py-1 bg-[#2a2a3e] rounded text-xs text-gray-300 font-mono"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Current values display */}
+          <div className="mb-3 p-2 bg-[#0d0d14] rounded text-[10px] font-mono">
+            <div className="flex justify-between">
+              <span className="text-emerald-400">Start Value: {currentStartVal.toFixed(4)}</span>
+              <span className="text-rose-400">End Value: {currentEndVal.toFixed(4)}</span>
+            </div>
+          </div>
 
           {/* Timeline Position */}
           <TimelineRange
@@ -250,11 +220,18 @@ function EffectEditor({ effect, onChange, valueMin, valueMax, valueStep = 0.001 
 
           {showCurve && (
             <div className="mt-2">
+              <p className="text-[10px] text-gray-500 mb-2">
+                Drag green/red endpoints to set start/end values (0-1 of range)
+              </p>
               <BezierCurveEditor
                 value={effect.curve}
                 onChange={(curve) => onChange({ ...effect, curve })}
-                width={180}
-                height={100}
+                curveStart={effect.curveStart}
+                curveEnd={effect.curveEnd}
+                onCurveStartChange={(v) => onChange({ ...effect, curveStart: v })}
+                onCurveEndChange={(v) => onChange({ ...effect, curveEnd: v })}
+                width={220}
+                height={140}
               />
               <div className="flex flex-wrap gap-1 mt-2">
                 {curvePresets.map((preset) => (
@@ -424,9 +401,6 @@ export function SettingsPanel({
             <EffectEditor
               effect={cornerRadiusEffect}
               onChange={(effect) => updateEffect('cornerRadius', effect)}
-              valueMin={0.01}
-              valueMax={0.15}
-              valueStep={0.001}
             />
           )}
         </Section>

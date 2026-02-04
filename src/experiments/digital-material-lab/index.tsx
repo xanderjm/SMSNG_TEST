@@ -11,11 +11,13 @@ export interface Effect {
   id: string;
   name: string;
   enabled: boolean;
-  startValue: number;      // Value at start of effect
-  endValue: number;        // Value at end of effect
+  min: number;             // Minimum possible value (absolute)
+  max: number;             // Maximum possible value (absolute)
   startT: number;          // Start position on master timeline (0-1)
   endT: number;            // End position on master timeline (0-1)
-  curve: [number, number, number, number];  // Bezier curve for this effect
+  curveStart: number;      // Curve start Y position (0-1, maps to min-max range)
+  curveEnd: number;        // Curve end Y position (0-1, maps to min-max range)
+  curve: [number, number, number, number];  // Bezier control points [x1, y1, x2, y2]
 }
 
 export interface MaterialUniforms {
@@ -40,39 +42,42 @@ export interface AnimationConfig {
 
 // Calculate the current value of an effect based on master timeline progress
 export function calculateEffectValue(effect: Effect, masterProgress: number): number {
-  if (!effect.enabled) {
-    return effect.startValue;
+  const { startT, endT, min, max, curveStart, curveEnd, curve, enabled } = effect;
+
+  // If disabled, return the value at curve start position
+  if (!enabled) {
+    return min + (max - min) * curveStart;
   }
 
-  const { startT, endT, startValue, endValue, curve } = effect;
-
-  // Before effect starts
+  // Before effect starts - use the curve's start value
   if (masterProgress <= startT) {
-    return startValue;
+    return min + (max - min) * curveStart;
   }
 
-  // After effect ends
+  // After effect ends - use the curve's end value
   if (masterProgress >= endT) {
-    return endValue;
+    return min + (max - min) * curveEnd;
   }
 
   // During effect - calculate local progress and apply curve
   const localProgress = (masterProgress - startT) / (endT - startT);
-  const easedProgress = cubicBezier(localProgress, curve);
+  const curveOutput = cubicBezier(localProgress, curve); // Returns 0-1
 
-  return startValue + (endValue - startValue) * easedProgress;
+  // Map curve output (0-1) to the curveStart-curveEnd range
+  const mappedOutput = curveStart + (curveEnd - curveStart) * curveOutput;
+
+  // Map that to the min-max range
+  return min + (max - min) * mappedOutput;
 }
 
 // Capsule dimensions in pixels (based on ~1440 height viewport)
 const CONTRACTED_SIZE: [number, number] = [1260 / 2 / 1440, 180 / 2 / 1440];
 const EXPANDED_SIZE: [number, number] = [1260 / 2 / 1440, 1440 / 2 / 1440];
-const CORNER_RADIUS_START = 60 / 1440;  // 0.042
-const CORNER_RADIUS_END = 60 / 1440;    // Same for now, can be different
 
 const defaultUniforms: MaterialUniforms = {
   animProgress: 0,
   rectSize: CONTRACTED_SIZE,
-  cornerRadius: CORNER_RADIUS_START,
+  cornerRadius: 60 / 1440,
 
   // Digital Physics
   viscosity: 0.5,
@@ -90,10 +95,12 @@ const defaultAnimConfig: AnimationConfig = {
       id: 'cornerRadius',
       name: 'Corner Roundness',
       enabled: true,
-      startValue: CORNER_RADIUS_START,
-      endValue: CORNER_RADIUS_END,
-      startT: 0,
-      endT: 1,
+      min: 0.01,              // Minimum corner radius
+      max: 0.15,              // Maximum corner radius
+      startT: 0,              // Start at beginning of timeline
+      endT: 1,                // End at end of timeline
+      curveStart: 0.28,       // Start at ~28% of range (≈0.042, which is 60/1440)
+      curveEnd: 0.28,         // End at same value (no change by default)
       curve: [0.4, 0, 0.2, 1],
     },
   ],

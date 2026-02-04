@@ -3,7 +3,7 @@
  *
  * Includes:
  * - Main shape shader (SDF rounded rectangle with squircle)
- * - Trail shader (framebuffer feedback for persistence)
+ * - Trail accumulation shader (framebuffer ping-pong for smooth trails)
  * - Composite shader (combines background, trails, and shape)
  */
 
@@ -19,7 +19,129 @@ export const vertexShaderSource = `
   }
 `;
 
-// Main fragment shader - renders the shape
+// Shape-only fragment shader - renders just the shape mask and color
+// Used for rendering to the trail accumulation buffer
+export const shapeFragmentShaderSource = `
+  precision highp float;
+
+  varying vec2 v_position;
+  varying vec2 v_texCoord;
+
+  uniform vec2 u_resolution;
+  uniform vec2 u_rectSize;
+  uniform float u_cornerRadius;
+  uniform float u_squircle;
+  uniform float u_blur;
+
+  // Lp norm (generalized length function)
+  float lpLength(vec2 v, float p) {
+    vec2 av = abs(v);
+    if (av.x < 0.0001 && av.y < 0.0001) return 0.0;
+    return pow(pow(av.x, p) + pow(av.y, p), 1.0 / p);
+  }
+
+  // Signed Distance Function for rounded box with squircle corners
+  float sdRoundedBox(vec2 p, vec2 b, float r, float n) {
+    vec2 q = abs(p) - b + r;
+    return min(max(q.x, q.y), 0.0) + lpLength(max(q, vec2(0.0)), n) - r;
+  }
+
+  float getFill(vec2 uv, float edge) {
+    float maxRadius = min(u_rectSize.x, u_rectSize.y);
+    float clampedRadius = min(u_cornerRadius, maxRadius);
+    float d = sdRoundedBox(uv, u_rectSize, clampedRadius, u_squircle);
+    return 1.0 - smoothstep(-edge, edge, d);
+  }
+
+  void main() {
+    vec2 uv = v_position;
+    float aspect = u_resolution.x / u_resolution.y;
+    uv.x *= aspect;
+
+    float pixelSize = 2.0 / u_resolution.y;
+    float edge = pixelSize * 1.5;
+
+    float fill = 0.0;
+
+    if (u_blur < 0.5) {
+      fill = getFill(uv, edge);
+    } else {
+      float blurRadius = u_blur * pixelSize;
+      float totalWeight = 0.0;
+
+      for (int x = -1; x <= 1; x++) {
+        for (int y = -1; y <= 1; y++) {
+          vec2 offset = vec2(float(x), float(y)) * blurRadius;
+          float weight = 1.0 - length(vec2(float(x), float(y))) * 0.3;
+          fill += getFill(uv + offset, edge + blurRadius * 0.5) * weight;
+          totalWeight += weight;
+        }
+      }
+      fill /= totalWeight;
+
+      if (u_blur > 8.0) {
+        float extraBlur = 0.0;
+        float extraWeight = 0.0;
+        float largeRadius = blurRadius * 2.0;
+
+        for (int x = -2; x <= 2; x++) {
+          for (int y = -2; y <= 2; y++) {
+            float fx = float(x);
+            float fy = float(y);
+            if (abs(fx) > 1.0 || abs(fy) > 1.0) {
+              vec2 offset = vec2(fx, fy) * largeRadius * 0.5;
+              float weight = 1.0 - length(vec2(fx, fy)) * 0.15;
+              extraBlur += getFill(uv + offset, edge + largeRadius) * weight;
+              extraWeight += weight;
+            }
+          }
+        }
+        extraBlur /= extraWeight;
+        fill = mix(fill, extraBlur, (u_blur - 8.0) / 12.0);
+      }
+    }
+
+    // Output: RGB = white shape, A = shape mask
+    gl_FragColor = vec4(1.0, 1.0, 1.0, fill);
+  }
+`;
+
+// Trail accumulation shader - blends current shape with previous trail buffer
+export const trailAccumulateShaderSource = `
+  precision highp float;
+
+  varying vec2 v_texCoord;
+
+  uniform sampler2D u_currentShape;    // Current shape (from shapeFragmentShader)
+  uniform sampler2D u_previousTrail;   // Previous trail buffer
+  uniform float u_persistence;         // How much trail persists (0-1)
+  uniform float u_trailAmount;         // Trail intensity/opacity
+  uniform vec3 u_trailColor;           // Current trail color
+
+  void main() {
+    vec4 currentShape = texture2D(u_currentShape, v_texCoord);
+    vec4 previousTrail = texture2D(u_previousTrail, v_texCoord);
+
+    // Fade the previous trail by persistence factor
+    vec3 fadedTrail = previousTrail.rgb * u_persistence;
+    float fadedAlpha = previousTrail.a * u_persistence;
+
+    // Add current shape to trail with color
+    vec3 newTrailColor = u_trailColor * currentShape.a * u_trailAmount;
+    float newAlpha = currentShape.a * u_trailAmount;
+
+    // Additive blend for glow effect, but cap to prevent blowout
+    vec3 combinedColor = fadedTrail + newTrailColor;
+    float combinedAlpha = max(fadedAlpha, newAlpha);
+
+    // Soft clamp to prevent excessive brightness
+    combinedColor = combinedColor / (1.0 + combinedColor * 0.5);
+
+    gl_FragColor = vec4(combinedColor, combinedAlpha);
+  }
+`;
+
+// Main composite shader - combines background, trail buffer, and current shape
 export const fragmentShaderSource = `
   precision highp float;
 
@@ -34,21 +156,12 @@ export const fragmentShaderSource = `
   // Geometry
   uniform vec2 u_rectSize;
   uniform float u_cornerRadius;
-  uniform float u_squircle;      // Superellipse exponent: 2.0 = circle, >2 = squircle
+  uniform float u_squircle;
   uniform float u_blur;
 
-  // Trail effect - ghost shapes at previous sizes
+  // Trail
   uniform float u_trailEnabled;
-  uniform float u_trailAmount;
-  uniform vec2 u_trailSize0;     // Previous size 1 (oldest)
-  uniform vec2 u_trailSize1;     // Previous size 2
-  uniform vec2 u_trailSize2;     // Previous size 3
-  uniform vec2 u_trailSize3;     // Previous size 4 (newest ghost)
-  uniform vec3 u_trailColor0;
-  uniform vec3 u_trailColor1;
-  uniform vec3 u_trailColor2;
-  uniform vec3 u_trailColor3;
-  uniform vec4 u_trailColorPositions;  // positions for the 4 color stops
+  uniform sampler2D u_trailBuffer;     // Accumulated trail texture
 
   // Background
   uniform float u_hasBackground;
@@ -74,54 +187,24 @@ export const fragmentShaderSource = `
     return min(max(q.x, q.y), 0.0) + lpLength(max(q, vec2(0.0)), n) - r;
   }
 
-  // Calculate fill value for a given UV position and size
-  float getFillAtSize(vec2 uv, vec2 size, float cornerRadius, float edge) {
-    // Clamp corner radius to half the shortest edge
-    float maxRadius = min(size.x, size.y);
-    float clampedRadius = min(cornerRadius, maxRadius);
-    float d = sdRoundedBox(uv, size, clampedRadius, u_squircle);
+  float getFill(vec2 uv, float edge) {
+    float maxRadius = min(u_rectSize.x, u_rectSize.y);
+    float clampedRadius = min(u_cornerRadius, maxRadius);
+    float d = sdRoundedBox(uv, u_rectSize, clampedRadius, u_squircle);
     return 1.0 - smoothstep(-edge, edge, d);
   }
 
-  // Calculate fill value for current shape
-  float getFill(vec2 uv, float edge) {
-    return getFillAtSize(uv, u_rectSize, u_cornerRadius, edge);
-  }
-
-  // Sample color from gradient ramp
-  vec3 sampleColorRamp(float t) {
-    t = clamp(t, 0.0, 1.0);
-
-    // Find which segment we're in
-    if (t <= u_trailColorPositions.x) {
-      return u_trailColor0;
-    } else if (t <= u_trailColorPositions.y) {
-      float localT = (t - u_trailColorPositions.x) / max(0.001, u_trailColorPositions.y - u_trailColorPositions.x);
-      return mix(u_trailColor0, u_trailColor1, localT);
-    } else if (t <= u_trailColorPositions.z) {
-      float localT = (t - u_trailColorPositions.y) / max(0.001, u_trailColorPositions.z - u_trailColorPositions.y);
-      return mix(u_trailColor1, u_trailColor2, localT);
-    } else if (t <= u_trailColorPositions.w) {
-      float localT = (t - u_trailColorPositions.z) / max(0.001, u_trailColorPositions.w - u_trailColorPositions.z);
-      return mix(u_trailColor2, u_trailColor3, localT);
-    }
-    return u_trailColor3;
-  }
-
   void main() {
-    // Normalize coordinates with aspect ratio correction
     vec2 uv = v_position;
     float aspect = u_resolution.x / u_resolution.y;
     uv.x *= aspect;
 
-    // Anti-aliasing edge detection
     float pixelSize = 2.0 / u_resolution.y;
     float edge = pixelSize * 1.5;
 
     // Get background color
     vec3 bgColor = vec3(0.05, 0.05, 0.08);
     if (u_hasBackground > 0.5) {
-      // Flip Y for proper image orientation
       vec2 bgUV = vec2(v_texCoord.x, 1.0 - v_texCoord.y);
       bgColor = texture2D(u_backgroundTexture, bgUV).rgb;
     }
@@ -129,40 +212,13 @@ export const fragmentShaderSource = `
     // Start with background
     vec3 color = bgColor;
 
-    // Draw trail ghosts (oldest to newest, so newer ones layer on top)
-    if (u_trailEnabled > 0.5 && u_trailAmount > 0.01) {
-      float trailEdge = edge * 2.0;  // Softer edges for trail ghosts
-
-      // Ghost 0 (oldest) - most faded
-      float ghost0 = getFillAtSize(uv, u_trailSize0, u_cornerRadius, trailEdge);
-      if (ghost0 > 0.01) {
-        vec3 ghostColor0 = sampleColorRamp(0.0);
-        color = color + ghostColor0 * ghost0 * u_trailAmount * 0.3;
-      }
-
-      // Ghost 1
-      float ghost1 = getFillAtSize(uv, u_trailSize1, u_cornerRadius, trailEdge);
-      if (ghost1 > 0.01) {
-        vec3 ghostColor1 = sampleColorRamp(0.33);
-        color = color + ghostColor1 * ghost1 * u_trailAmount * 0.45;
-      }
-
-      // Ghost 2
-      float ghost2 = getFillAtSize(uv, u_trailSize2, u_cornerRadius, trailEdge);
-      if (ghost2 > 0.01) {
-        vec3 ghostColor2 = sampleColorRamp(0.66);
-        color = color + ghostColor2 * ghost2 * u_trailAmount * 0.6;
-      }
-
-      // Ghost 3 (newest ghost) - brightest
-      float ghost3 = getFillAtSize(uv, u_trailSize3, u_cornerRadius, trailEdge);
-      if (ghost3 > 0.01) {
-        vec3 ghostColor3 = sampleColorRamp(1.0);
-        color = color + ghostColor3 * ghost3 * u_trailAmount * 0.8;
-      }
+    // Add trail (additive blend for glow)
+    if (u_trailEnabled > 0.5) {
+      vec4 trail = texture2D(u_trailBuffer, v_texCoord);
+      color = color + trail.rgb;
     }
 
-    // Blur sampling for main shape
+    // Render main shape with blur
     float fill = 0.0;
 
     if (u_blur < 0.5) {
@@ -210,41 +266,6 @@ export const fragmentShaderSource = `
     color = mix(color, fillColor, fill);
 
     gl_FragColor = vec4(color, 1.0);
-  }
-`;
-
-// Trail accumulation shader - blends current frame with previous for persistence
-export const trailFragmentShaderSource = `
-  precision highp float;
-
-  varying vec2 v_texCoord;
-
-  uniform sampler2D u_currentFrame;    // Current rendered frame
-  uniform sampler2D u_previousTrail;   // Previous trail buffer
-  uniform float u_persistence;         // How much trail persists (0-1)
-  uniform float u_trailAmount;         // Trail intensity
-  uniform float u_deltaTime;           // Time since last frame for aging
-
-  void main() {
-    vec4 current = texture2D(u_currentFrame, v_texCoord);
-    vec4 previous = texture2D(u_previousTrail, v_texCoord);
-
-    // Calculate the brightness of the current frame as mask for new trail
-    float currentBrightness = dot(current.rgb, vec3(0.299, 0.587, 0.114));
-
-    // Age the previous trail (stored in red channel)
-    float previousAge = previous.r + u_deltaTime * 2.0;
-    float previousIntensity = previous.a * u_persistence;
-
-    // New trail contribution (from bright areas in current frame)
-    float newTrailMask = smoothstep(0.3, 0.8, currentBrightness) * u_trailAmount;
-
-    // Combine: keep stronger intensity, blend age
-    float finalIntensity = max(previousIntensity, newTrailMask);
-    float finalAge = newTrailMask > previousIntensity ? 0.0 : previousAge;
-
-    // Output: r = age, g = unused, b = unused, a = intensity
-    gl_FragColor = vec4(finalAge, 0.0, 0.0, finalIntensity);
   }
 `;
 

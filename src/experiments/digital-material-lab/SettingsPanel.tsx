@@ -1,7 +1,7 @@
-import { useState, useRef, useEffect } from 'react';
-import { ChevronDown, ChevronRight, Copy, Download, Upload, Circle, Square } from 'lucide-react';
-import type { MaterialUniforms, AnimationConfig, Effect, EffectVariable, ViewportMode } from './index';
-import { CANVAS_WIDTH, CANVAS_HEIGHT } from './index';
+import { useState, useRef, useEffect, useCallback } from 'react';
+import { ChevronDown, ChevronRight, Copy, Download, Upload, Circle, Square, Image, X, Plus, Trash2, GripVertical } from 'lucide-react';
+import type { MaterialUniforms, AnimationConfig, Effect, EffectVariable, ViewportMode, ColorStop } from './index';
+import { CANVAS_WIDTH, CANVAS_HEIGHT, EFFECT_TEMPLATES } from './index';
 import { MultiPointCurveEditor } from './MultiPointCurveEditor';
 import { BezierCurveEditor } from './BezierCurveEditor';
 import { CURVES } from './animation';
@@ -16,6 +16,139 @@ interface SettingsPanelProps {
   onViewportModeChange: (mode: ViewportMode) => void;
   isRecording: boolean;
   onToggleRecording: () => void;
+}
+
+// Color ramp editor for trail effect
+interface ColorRampEditorProps {
+  colorRamp: ColorStop[];
+  onChange: (colorRamp: ColorStop[]) => void;
+}
+
+function rgbToHex(r: number, g: number, b: number): string {
+  const toHex = (n: number) => Math.round(n * 255).toString(16).padStart(2, '0');
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+}
+
+function hexToRgb(hex: string): [number, number, number] {
+  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  if (result) {
+    return [
+      parseInt(result[1], 16) / 255,
+      parseInt(result[2], 16) / 255,
+      parseInt(result[3], 16) / 255,
+    ];
+  }
+  return [1, 1, 1];
+}
+
+function ColorRampEditor({ colorRamp, onChange }: ColorRampEditorProps) {
+  const updateColor = (index: number, color: [number, number, number]) => {
+    const newRamp = [...colorRamp];
+    newRamp[index] = { ...newRamp[index], color };
+    onChange(newRamp);
+  };
+
+  // Create gradient string for preview
+  const gradientStops = colorRamp
+    .map(stop => `${rgbToHex(stop.color[0], stop.color[1], stop.color[2])} ${stop.position * 100}%`)
+    .join(', ');
+
+  return (
+    <div className="mt-3">
+      <span className="text-[11px] font-medium text-neutral-400 block mb-2">Color Ramp</span>
+
+      {/* Gradient preview */}
+      <div
+        className="h-6 rounded mb-3 border border-neutral-700"
+        style={{ background: `linear-gradient(to right, ${gradientStops})` }}
+      />
+
+      {/* Color stops */}
+      <div className="grid grid-cols-4 gap-2">
+        {colorRamp.map((stop, index) => (
+          <div key={index} className="flex flex-col items-center gap-1">
+            <input
+              type="color"
+              value={rgbToHex(stop.color[0], stop.color[1], stop.color[2])}
+              onChange={(e) => updateColor(index, hexToRgb(e.target.value))}
+              className="w-8 h-8 rounded cursor-pointer border border-neutral-700 bg-transparent"
+            />
+            <span className="text-[8px] text-neutral-500">{(stop.position * 100).toFixed(0)}%</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Background image picker
+interface BackgroundPickerProps {
+  backgroundImage?: string;
+  onChange: (image: string | undefined) => void;
+}
+
+function BackgroundPicker({ backgroundImage, onChange }: BackgroundPickerProps) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      onChange(event.target?.result as string);
+    };
+    reader.readAsDataURL(file);
+  }, [onChange]);
+
+  const handleClear = useCallback(() => {
+    onChange(undefined);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  }, [onChange]);
+
+  return (
+    <div className="mb-4">
+      <span className="text-[11px] font-medium text-neutral-400 block mb-2">Background Image</span>
+
+      {backgroundImage ? (
+        <div className="relative">
+          <img
+            src={backgroundImage}
+            alt="Background"
+            className="w-full h-20 object-cover rounded border border-neutral-700"
+          />
+          <button
+            onClick={handleClear}
+            className="absolute top-1 right-1 p-1 rounded bg-neutral-900/80 text-neutral-400 hover:text-neutral-200 transition-colors"
+          >
+            <X className="w-3 h-3" />
+          </button>
+        </div>
+      ) : (
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded border border-dashed border-neutral-700 text-neutral-500 hover:border-neutral-500 hover:text-neutral-400 transition-colors"
+        >
+          <Image className="w-4 h-4" />
+          <span className="text-xs">Choose Image</span>
+        </button>
+      )}
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        onChange={handleFileSelect}
+        className="hidden"
+      />
+
+      <p className="text-[9px] text-neutral-600 mt-1.5">
+        Image will be scaled to fit canvas
+      </p>
+    </div>
+  );
 }
 
 interface SliderProps {
@@ -213,9 +346,28 @@ function VariableRange({ variable, curveStart, curveEnd, onChange }: VariableRan
 interface EffectEditorProps {
   effect: Effect;
   onChange: (effect: Effect) => void;
+  onRemove: () => void;
+  isCollapsed: boolean;
+  onToggleCollapse: () => void;
+  onDragStart: (e: React.DragEvent) => void;
+  onDragOver: (e: React.DragEvent) => void;
+  onDragEnd: () => void;
+  isDragging: boolean;
+  isDragOver: boolean;
 }
 
-function EffectEditor({ effect, onChange }: EffectEditorProps) {
+function EffectEditor({
+  effect,
+  onChange,
+  onRemove,
+  isCollapsed,
+  onToggleCollapse,
+  onDragStart,
+  onDragOver,
+  onDragEnd,
+  isDragging,
+  isDragOver,
+}: EffectEditorProps) {
   const [showCurve, setShowCurve] = useState(true);
 
   const updateVariable = (variableId: string, updatedVariable: EffectVariable) => {
@@ -225,31 +377,77 @@ function EffectEditor({ effect, onChange }: EffectEditorProps) {
     onChange({ ...effect, variables: newVariables });
   };
 
+  const updateColorRamp = (colorRamp: ColorStop[]) => {
+    onChange({ ...effect, colorRamp });
+  };
+
   // Get curve start/end Y values for variable display
   const curveStart = effect.curvePoints[0]?.y ?? 0;
   const curveEnd = effect.curvePoints[effect.curvePoints.length - 1]?.y ?? 1;
 
+  // Check if this effect has a color ramp
+  const hasColorRamp = effect.colorRamp !== undefined;
+
   return (
-    <div className="bg-neutral-800/50 rounded-lg p-4">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-4">
-        <span className="text-sm font-medium text-neutral-200">{effect.name}</span>
-        <button
-          onClick={() => onChange({ ...effect, enabled: !effect.enabled })}
-          className={`w-10 h-5 rounded-full transition-colors relative ${
-            effect.enabled ? 'bg-neutral-500' : 'bg-neutral-700'
-          }`}
+    <div
+      draggable
+      onDragStart={onDragStart}
+      onDragOver={onDragOver}
+      onDragEnd={onDragEnd}
+      className={`bg-neutral-800/50 rounded-lg transition-all ${
+        isDragging ? 'opacity-50 scale-[0.98]' : ''
+      } ${isDragOver ? 'ring-2 ring-neutral-500' : ''}`}
+    >
+      {/* Header - always visible, clickable to collapse */}
+      <div
+        className="flex items-center gap-2 p-3 cursor-pointer select-none"
+        onClick={onToggleCollapse}
+      >
+        {/* Drag handle */}
+        <div
+          className="p-1 cursor-grab active:cursor-grabbing text-neutral-600 hover:text-neutral-400"
+          onClick={(e) => e.stopPropagation()}
         >
-          <div
-            className={`absolute top-0.5 w-4 h-4 rounded-full bg-neutral-200 transition-transform ${
-              effect.enabled ? 'translate-x-5' : 'translate-x-0.5'
+          <GripVertical className="w-3.5 h-3.5" />
+        </div>
+
+        {/* Collapse indicator */}
+        {isCollapsed ? (
+          <ChevronRight className="w-3.5 h-3.5 text-neutral-500" />
+        ) : (
+          <ChevronDown className="w-3.5 h-3.5 text-neutral-500" />
+        )}
+
+        {/* Effect name */}
+        <span className="flex-1 text-sm font-medium text-neutral-200">{effect.name}</span>
+
+        {/* Controls */}
+        <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+          <button
+            onClick={() => onChange({ ...effect, enabled: !effect.enabled })}
+            className={`w-10 h-5 rounded-full transition-colors relative ${
+              effect.enabled ? 'bg-neutral-500' : 'bg-neutral-700'
             }`}
-          />
-        </button>
+          >
+            <div
+              className={`absolute top-0.5 w-4 h-4 rounded-full bg-neutral-200 transition-transform ${
+                effect.enabled ? 'translate-x-5' : 'translate-x-0.5'
+              }`}
+            />
+          </button>
+          <button
+            onClick={onRemove}
+            className="p-1.5 rounded text-neutral-500 hover:text-red-400 hover:bg-neutral-700 transition-colors"
+            title="Remove effect"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
+        </div>
       </div>
 
-      {effect.enabled && (
-        <>
+      {/* Expanded content */}
+      {!isCollapsed && effect.enabled && (
+        <div className="px-4 pb-4">
           {/* Mode Toggle */}
           <div className="mb-4">
             <span className="text-[11px] font-medium text-neutral-400 block mb-2">Mode</span>
@@ -329,7 +527,17 @@ function EffectEditor({ effect, onChange }: EffectEditorProps) {
               />
             ))}
           </div>
-        </>
+
+          {/* Color Ramp Section (only for effects with color ramp) */}
+          {hasColorRamp && effect.colorRamp && (
+            <div className="border-t border-neutral-700 pt-4 mt-4">
+              <ColorRampEditor
+                colorRamp={effect.colorRamp}
+                onChange={updateColorRamp}
+              />
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
@@ -376,6 +584,55 @@ export function SettingsPanel({
   isRecording,
   onToggleRecording,
 }: SettingsPanelProps) {
+  // Track collapsed state for each effect
+  const [collapsedEffects, setCollapsedEffects] = useState<Set<string>>(new Set());
+
+  // Drag and drop state
+  const [draggedEffectId, setDraggedEffectId] = useState<string | null>(null);
+  const [dragOverEffectId, setDragOverEffectId] = useState<string | null>(null);
+
+  const toggleEffectCollapsed = (effectId: string) => {
+    setCollapsedEffects(prev => {
+      const next = new Set(prev);
+      if (next.has(effectId)) {
+        next.delete(effectId);
+      } else {
+        next.add(effectId);
+      }
+      return next;
+    });
+  };
+
+  const handleDragStart = (effectId: string) => (e: React.DragEvent) => {
+    setDraggedEffectId(effectId);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', effectId);
+  };
+
+  const handleDragOver = (effectId: string) => (e: React.DragEvent) => {
+    e.preventDefault();
+    if (draggedEffectId && draggedEffectId !== effectId) {
+      setDragOverEffectId(effectId);
+    }
+  };
+
+  const handleDragEnd = () => {
+    if (draggedEffectId && dragOverEffectId && draggedEffectId !== dragOverEffectId) {
+      // Reorder effects
+      const effects = [...animConfig.effects];
+      const draggedIndex = effects.findIndex(e => e.id === draggedEffectId);
+      const targetIndex = effects.findIndex(e => e.id === dragOverEffectId);
+
+      if (draggedIndex !== -1 && targetIndex !== -1) {
+        const [removed] = effects.splice(draggedIndex, 1);
+        effects.splice(targetIndex, 0, removed);
+        onAnimConfigChange({ ...animConfig, effects });
+      }
+    }
+    setDraggedEffectId(null);
+    setDragOverEffectId(null);
+  };
+
   const updateUniform = <K extends keyof MaterialUniforms>(
     key: K,
     value: MaterialUniforms[K]
@@ -389,6 +646,26 @@ export function SettingsPanel({
     );
     onAnimConfigChange({ ...animConfig, effects: newEffects });
   };
+
+  const addEffect = (effectId: string) => {
+    const template = EFFECT_TEMPLATES[effectId];
+    if (!template) return;
+    // Check if effect already exists
+    if (animConfig.effects.some(e => e.id === effectId)) return;
+    // Deep clone the template
+    const newEffect = JSON.parse(JSON.stringify(template));
+    onAnimConfigChange({ ...animConfig, effects: [...animConfig.effects, newEffect] });
+  };
+
+  const removeEffect = (effectId: string) => {
+    const newEffects = animConfig.effects.filter(e => e.id !== effectId);
+    onAnimConfigChange({ ...animConfig, effects: newEffects });
+  };
+
+  // Get available effects (templates not yet added)
+  const availableEffects = Object.entries(EFFECT_TEMPLATES).filter(
+    ([id]) => !animConfig.effects.some(e => e.id === id)
+  );
 
   const handleExport = () => {
     const data = {
@@ -416,7 +693,17 @@ export function SettingsPanel({
         try {
           const data = JSON.parse(e.target?.result as string);
           if (data.uniforms) onUniformsChange(data.uniforms);
-          if (data.animConfig) onAnimConfigChange(data.animConfig);
+          if (data.animConfig) {
+            // Intelligently merge effects:
+            // - If imported config has effects, use those (preserving customizations)
+            // - If imported has no effects or empty array, preserve current effects
+            const importedConfig = { ...data.animConfig };
+            if (!importedConfig.effects || importedConfig.effects.length === 0) {
+              // Old preset or preset with no effects - keep current effects
+              importedConfig.effects = animConfig.effects;
+            }
+            onAnimConfigChange(importedConfig);
+          }
         } catch (err) {
           console.error('Failed to parse preset file');
         }
@@ -438,8 +725,9 @@ export function SettingsPanel({
     { name: 'sharp', curve: CURVES.sharp },
   ];
 
-  const cornerRadiusEffect = animConfig.effects.find(e => e.id === 'cornerRadius');
-  const focusEffect = animConfig.effects.find(e => e.id === 'focus');
+  const handleBackgroundChange = (image: string | undefined) => {
+    onAnimConfigChange({ ...animConfig, backgroundImage: image });
+  };
 
   return (
     <div className="w-[340px] bg-neutral-900 border-l border-neutral-800 flex flex-col overflow-hidden">
@@ -549,20 +837,68 @@ export function SettingsPanel({
           </div>
         </Section>
 
+        {/* Background Section */}
+        <Section title="Background">
+          <BackgroundPicker
+            backgroundImage={animConfig.backgroundImage}
+            onChange={handleBackgroundChange}
+          />
+        </Section>
+
         {/* Effects Section */}
         <Section title="Effects">
-          {cornerRadiusEffect && (
-            <EffectEditor
-              effect={cornerRadiusEffect}
-              onChange={(effect) => updateEffect('cornerRadius', effect)}
-            />
+          {/* List of active effects */}
+          <div onDragLeave={() => setDragOverEffectId(null)}>
+            {animConfig.effects.map((effect, index) => (
+              <div key={effect.id} className={index > 0 ? 'mt-3' : ''}>
+                <EffectEditor
+                  effect={effect}
+                  onChange={(updatedEffect) => updateEffect(effect.id, updatedEffect)}
+                  onRemove={() => removeEffect(effect.id)}
+                  isCollapsed={collapsedEffects.has(effect.id)}
+                  onToggleCollapse={() => toggleEffectCollapsed(effect.id)}
+                  onDragStart={handleDragStart(effect.id)}
+                  onDragOver={handleDragOver(effect.id)}
+                  onDragEnd={handleDragEnd}
+                  isDragging={draggedEffectId === effect.id}
+                  isDragOver={dragOverEffectId === effect.id}
+                />
+              </div>
+            ))}
+          </div>
+
+          {/* Empty state */}
+          {animConfig.effects.length === 0 && (
+            <p className="text-[11px] text-neutral-500 text-center py-4">
+              No effects added. Click below to add one.
+            </p>
           )}
-          {focusEffect && (
-            <div className="mt-4">
-              <EffectEditor
-                effect={focusEffect}
-                onChange={(effect) => updateEffect('focus', effect)}
-              />
+
+          {/* Add effect button/dropdown */}
+          {availableEffects.length > 0 && (
+            <div className={animConfig.effects.length > 0 ? 'mt-4' : ''}>
+              <div className="relative">
+                <select
+                  onChange={(e) => {
+                    if (e.target.value) {
+                      addEffect(e.target.value);
+                      e.target.value = '';
+                    }
+                  }}
+                  className="w-full appearance-none bg-neutral-800 border border-dashed border-neutral-700 rounded-lg px-4 py-3 text-xs text-neutral-400 cursor-pointer hover:border-neutral-500 hover:text-neutral-300 transition-colors focus:outline-none focus:border-neutral-500"
+                  defaultValue=""
+                >
+                  <option value="" disabled>
+                    + Add Effect...
+                  </option>
+                  {availableEffects.map(([id, template]) => (
+                    <option key={id} value={id}>
+                      {template.name}
+                    </option>
+                  ))}
+                </select>
+                <Plus className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-500 pointer-events-none" />
+              </div>
             </div>
           )}
         </Section>

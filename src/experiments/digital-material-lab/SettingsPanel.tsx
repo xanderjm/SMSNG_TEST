@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { ChevronDown, ChevronRight, Copy, Download, Upload, Circle, Square, Image, X, Plus, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, Copy, Download, Upload, Circle, Square, Image, X, Plus, Trash2, GripVertical } from 'lucide-react';
 import type { MaterialUniforms, AnimationConfig, Effect, EffectVariable, ViewportMode, ColorStop } from './index';
 import { CANVAS_WIDTH, CANVAS_HEIGHT, EFFECT_TEMPLATES } from './index';
 import { MultiPointCurveEditor } from './MultiPointCurveEditor';
@@ -347,9 +347,27 @@ interface EffectEditorProps {
   effect: Effect;
   onChange: (effect: Effect) => void;
   onRemove: () => void;
+  isCollapsed: boolean;
+  onToggleCollapse: () => void;
+  onDragStart: (e: React.DragEvent) => void;
+  onDragOver: (e: React.DragEvent) => void;
+  onDragEnd: () => void;
+  isDragging: boolean;
+  isDragOver: boolean;
 }
 
-function EffectEditor({ effect, onChange, onRemove }: EffectEditorProps) {
+function EffectEditor({
+  effect,
+  onChange,
+  onRemove,
+  isCollapsed,
+  onToggleCollapse,
+  onDragStart,
+  onDragOver,
+  onDragEnd,
+  isDragging,
+  isDragOver,
+}: EffectEditorProps) {
   const [showCurve, setShowCurve] = useState(true);
 
   const updateVariable = (variableId: string, updatedVariable: EffectVariable) => {
@@ -371,11 +389,40 @@ function EffectEditor({ effect, onChange, onRemove }: EffectEditorProps) {
   const hasColorRamp = effect.colorRamp !== undefined;
 
   return (
-    <div className="bg-neutral-800/50 rounded-lg p-4">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-4">
-        <span className="text-sm font-medium text-neutral-200">{effect.name}</span>
-        <div className="flex items-center gap-2">
+    <div
+      draggable
+      onDragStart={onDragStart}
+      onDragOver={onDragOver}
+      onDragEnd={onDragEnd}
+      className={`bg-neutral-800/50 rounded-lg transition-all ${
+        isDragging ? 'opacity-50 scale-[0.98]' : ''
+      } ${isDragOver ? 'ring-2 ring-neutral-500' : ''}`}
+    >
+      {/* Header - always visible, clickable to collapse */}
+      <div
+        className="flex items-center gap-2 p-3 cursor-pointer select-none"
+        onClick={onToggleCollapse}
+      >
+        {/* Drag handle */}
+        <div
+          className="p-1 cursor-grab active:cursor-grabbing text-neutral-600 hover:text-neutral-400"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <GripVertical className="w-3.5 h-3.5" />
+        </div>
+
+        {/* Collapse indicator */}
+        {isCollapsed ? (
+          <ChevronRight className="w-3.5 h-3.5 text-neutral-500" />
+        ) : (
+          <ChevronDown className="w-3.5 h-3.5 text-neutral-500" />
+        )}
+
+        {/* Effect name */}
+        <span className="flex-1 text-sm font-medium text-neutral-200">{effect.name}</span>
+
+        {/* Controls */}
+        <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
           <button
             onClick={() => onChange({ ...effect, enabled: !effect.enabled })}
             className={`w-10 h-5 rounded-full transition-colors relative ${
@@ -398,8 +445,9 @@ function EffectEditor({ effect, onChange, onRemove }: EffectEditorProps) {
         </div>
       </div>
 
-      {effect.enabled && (
-        <>
+      {/* Expanded content */}
+      {!isCollapsed && effect.enabled && (
+        <div className="px-4 pb-4">
           {/* Mode Toggle */}
           <div className="mb-4">
             <span className="text-[11px] font-medium text-neutral-400 block mb-2">Mode</span>
@@ -489,7 +537,7 @@ function EffectEditor({ effect, onChange, onRemove }: EffectEditorProps) {
               />
             </div>
           )}
-        </>
+        </div>
       )}
     </div>
   );
@@ -536,6 +584,55 @@ export function SettingsPanel({
   isRecording,
   onToggleRecording,
 }: SettingsPanelProps) {
+  // Track collapsed state for each effect
+  const [collapsedEffects, setCollapsedEffects] = useState<Set<string>>(new Set());
+
+  // Drag and drop state
+  const [draggedEffectId, setDraggedEffectId] = useState<string | null>(null);
+  const [dragOverEffectId, setDragOverEffectId] = useState<string | null>(null);
+
+  const toggleEffectCollapsed = (effectId: string) => {
+    setCollapsedEffects(prev => {
+      const next = new Set(prev);
+      if (next.has(effectId)) {
+        next.delete(effectId);
+      } else {
+        next.add(effectId);
+      }
+      return next;
+    });
+  };
+
+  const handleDragStart = (effectId: string) => (e: React.DragEvent) => {
+    setDraggedEffectId(effectId);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', effectId);
+  };
+
+  const handleDragOver = (effectId: string) => (e: React.DragEvent) => {
+    e.preventDefault();
+    if (draggedEffectId && draggedEffectId !== effectId) {
+      setDragOverEffectId(effectId);
+    }
+  };
+
+  const handleDragEnd = () => {
+    if (draggedEffectId && dragOverEffectId && draggedEffectId !== dragOverEffectId) {
+      // Reorder effects
+      const effects = [...animConfig.effects];
+      const draggedIndex = effects.findIndex(e => e.id === draggedEffectId);
+      const targetIndex = effects.findIndex(e => e.id === dragOverEffectId);
+
+      if (draggedIndex !== -1 && targetIndex !== -1) {
+        const [removed] = effects.splice(draggedIndex, 1);
+        effects.splice(targetIndex, 0, removed);
+        onAnimConfigChange({ ...animConfig, effects });
+      }
+    }
+    setDraggedEffectId(null);
+    setDragOverEffectId(null);
+  };
+
   const updateUniform = <K extends keyof MaterialUniforms>(
     key: K,
     value: MaterialUniforms[K]
@@ -751,15 +848,24 @@ export function SettingsPanel({
         {/* Effects Section */}
         <Section title="Effects">
           {/* List of active effects */}
-          {animConfig.effects.map((effect, index) => (
-            <div key={effect.id} className={index > 0 ? 'mt-4' : ''}>
-              <EffectEditor
-                effect={effect}
-                onChange={(updatedEffect) => updateEffect(effect.id, updatedEffect)}
-                onRemove={() => removeEffect(effect.id)}
-              />
-            </div>
-          ))}
+          <div onDragLeave={() => setDragOverEffectId(null)}>
+            {animConfig.effects.map((effect, index) => (
+              <div key={effect.id} className={index > 0 ? 'mt-3' : ''}>
+                <EffectEditor
+                  effect={effect}
+                  onChange={(updatedEffect) => updateEffect(effect.id, updatedEffect)}
+                  onRemove={() => removeEffect(effect.id)}
+                  isCollapsed={collapsedEffects.has(effect.id)}
+                  onToggleCollapse={() => toggleEffectCollapsed(effect.id)}
+                  onDragStart={handleDragStart(effect.id)}
+                  onDragOver={handleDragOver(effect.id)}
+                  onDragEnd={handleDragEnd}
+                  isDragging={draggedEffectId === effect.id}
+                  isDragOver={dragOverEffectId === effect.id}
+                />
+              </div>
+            ))}
+          </div>
 
           {/* Empty state */}
           {animConfig.effects.length === 0 && (

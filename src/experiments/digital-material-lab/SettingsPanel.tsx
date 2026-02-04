@@ -157,6 +157,40 @@ function EffectEditor({ effect, onChange }: EffectEditorProps) {
 
       {effect.enabled && (
         <>
+          {/* Mode Toggle */}
+          <div className="mb-3">
+            <div className="flex justify-between items-center mb-1">
+              <span className="text-xs text-gray-400">Effect Mode</span>
+            </div>
+            <div className="flex gap-1">
+              <button
+                onClick={() => onChange({ ...effect, mode: 'state' })}
+                className={`flex-1 px-2 py-1.5 rounded text-xs transition-colors ${
+                  effect.mode === 'state'
+                    ? 'bg-violet-500/30 text-violet-300 border border-violet-500/50'
+                    : 'bg-[#2a2a3e] text-gray-400'
+                }`}
+              >
+                State
+              </button>
+              <button
+                onClick={() => onChange({ ...effect, mode: 'animated' })}
+                className={`flex-1 px-2 py-1.5 rounded text-xs transition-colors ${
+                  effect.mode === 'animated'
+                    ? 'bg-violet-500/30 text-violet-300 border border-violet-500/50'
+                    : 'bg-[#2a2a3e] text-gray-400'
+                }`}
+              >
+                Animated
+              </button>
+            </div>
+            <p className="text-[10px] text-gray-500 mt-1">
+              {effect.mode === 'state'
+                ? 'Start/End represent collapsed/expanded states'
+                : 'Effect plays during timeline window'}
+            </p>
+          </div>
+
           {/* Min/Max Range */}
           <div className="mb-3">
             <div className="flex justify-between items-center mb-1">
@@ -192,18 +226,24 @@ function EffectEditor({ effect, onChange }: EffectEditorProps) {
           {/* Current values display */}
           <div className="mb-3 p-2 bg-[#0d0d14] rounded text-[10px] font-mono">
             <div className="flex justify-between">
-              <span className="text-emerald-400">Start Value: {currentStartVal.toFixed(4)}</span>
-              <span className="text-rose-400">End Value: {currentEndVal.toFixed(4)}</span>
+              <span className="text-emerald-400">
+                {effect.mode === 'state' ? 'Collapsed' : 'Start'}: {currentStartVal.toFixed(4)}
+              </span>
+              <span className="text-rose-400">
+                {effect.mode === 'state' ? 'Expanded' : 'End'}: {currentEndVal.toFixed(4)}
+              </span>
             </div>
           </div>
 
-          {/* Timeline Position */}
-          <TimelineRange
-            startT={effect.startT}
-            endT={effect.endT}
-            onStartChange={(v) => onChange({ ...effect, startT: v })}
-            onEndChange={(v) => onChange({ ...effect, endT: v })}
-          />
+          {/* Timeline Position - only shown in animated mode */}
+          {effect.mode === 'animated' && (
+            <TimelineRange
+              startT={effect.startT}
+              endT={effect.endT}
+              onStartChange={(v) => onChange({ ...effect, startT: v })}
+              onEndChange={(v) => onChange({ ...effect, endT: v })}
+            />
+          )}
 
           {/* Curve Editor Toggle */}
           <button
@@ -221,7 +261,7 @@ function EffectEditor({ effect, onChange }: EffectEditorProps) {
           {showCurve && (
             <div className="mt-2">
               <p className="text-[10px] text-gray-500 mb-2">
-                Drag green/red endpoints to set start/end values (0-1 of range)
+                Drag green/red endpoints to set {effect.mode === 'state' ? 'collapsed/expanded' : 'start/end'} values (0-1 of range)
               </p>
               <BezierCurveEditor
                 value={effect.curve}

@@ -11,10 +11,11 @@ export interface Effect {
   id: string;
   name: string;
   enabled: boolean;
+  mode: 'state' | 'animated';  // state = start/end represent two states, animated = plays during timeline window
   min: number;             // Minimum possible value (absolute)
   max: number;             // Maximum possible value (absolute)
-  startT: number;          // Start position on master timeline (0-1)
-  endT: number;            // End position on master timeline (0-1)
+  startT: number;          // Start position on master timeline (0-1) - only used in animated mode
+  endT: number;            // End position on master timeline (0-1) - only used in animated mode
   curveStart: number;      // Curve start Y position (0-1, maps to min-max range)
   curveEnd: number;        // Curve end Y position (0-1, maps to min-max range)
   curve: [number, number, number, number];  // Bezier control points [x1, y1, x2, y2]
@@ -42,32 +43,41 @@ export interface AnimationConfig {
 
 // Calculate the current value of an effect based on master timeline progress
 export function calculateEffectValue(effect: Effect, masterProgress: number): number {
-  const { startT, endT, min, max, curveStart, curveEnd, curve, enabled } = effect;
+  const { startT, endT, min, max, curveStart, curveEnd, curve, enabled, mode } = effect;
 
   // If disabled, return the value at curve start position
   if (!enabled) {
     return min + (max - min) * curveStart;
   }
 
-  // Before effect starts - use the curve's start value
-  if (masterProgress <= startT) {
-    return min + (max - min) * curveStart;
+  if (mode === 'state') {
+    // State mode: curveStart = collapsed state, curveEnd = expanded state
+    // Interpolate between them based on master progress using the curve
+    const curveOutput = cubicBezier(masterProgress, curve); // Returns 0-1
+    const mappedOutput = curveStart + (curveEnd - curveStart) * curveOutput;
+    return min + (max - min) * mappedOutput;
+  } else {
+    // Animated mode: effect plays during its timeline window (startT to endT)
+    // Before effect starts - use the curve's start value
+    if (masterProgress <= startT) {
+      return min + (max - min) * curveStart;
+    }
+
+    // After effect ends - use the curve's end value
+    if (masterProgress >= endT) {
+      return min + (max - min) * curveEnd;
+    }
+
+    // During effect - calculate local progress and apply curve
+    const localProgress = (masterProgress - startT) / (endT - startT);
+    const curveOutput = cubicBezier(localProgress, curve); // Returns 0-1
+
+    // Map curve output (0-1) to the curveStart-curveEnd range
+    const mappedOutput = curveStart + (curveEnd - curveStart) * curveOutput;
+
+    // Map that to the min-max range
+    return min + (max - min) * mappedOutput;
   }
-
-  // After effect ends - use the curve's end value
-  if (masterProgress >= endT) {
-    return min + (max - min) * curveEnd;
-  }
-
-  // During effect - calculate local progress and apply curve
-  const localProgress = (masterProgress - startT) / (endT - startT);
-  const curveOutput = cubicBezier(localProgress, curve); // Returns 0-1
-
-  // Map curve output (0-1) to the curveStart-curveEnd range
-  const mappedOutput = curveStart + (curveEnd - curveStart) * curveOutput;
-
-  // Map that to the min-max range
-  return min + (max - min) * mappedOutput;
 }
 
 // Capsule dimensions in pixels (based on ~1440 height viewport)
@@ -95,13 +105,14 @@ const defaultAnimConfig: AnimationConfig = {
       id: 'cornerRadius',
       name: 'Corner Roundness',
       enabled: true,
+      mode: 'state',          // State-based: collapsed vs expanded
       min: 0.01,              // Minimum corner radius
       max: 0.15,              // Maximum corner radius
-      startT: 0,              // Start at beginning of timeline
-      endT: 1,                // End at end of timeline
-      curveStart: 0.28,       // Start at ~28% of range (≈0.042, which is 60/1440)
-      curveEnd: 0.28,         // End at same value (no change by default)
-      curve: [0.4, 0, 0.2, 1],
+      startT: 0,              // Start at beginning of timeline (used in animated mode)
+      endT: 1,                // End at end of timeline (used in animated mode)
+      curveStart: 0,          // Start at 0 (min value in collapsed state)
+      curveEnd: 1,            // End at 1 (max value in expanded state)
+      curve: [0.4, 0, 0.2, 1], // Simple ease
     },
   ],
 };
@@ -219,9 +230,14 @@ export function DigitalMaterialLab() {
 
       // Calculate effect values
       const cornerRadiusEffect = animConfig.effects.find(e => e.id === 'cornerRadius');
-      const currentCornerRadius = cornerRadiusEffect
+      const rawCornerRadius = cornerRadiusEffect
         ? calculateEffectValue(cornerRadiusEffect, masterProgress)
         : uniforms.cornerRadius;
+
+      // Clamp corner radius to half the shortest edge to prevent pinching
+      // currentSize stores half-dimensions, so min(w, h) gives us the max valid radius
+      const maxCornerRadius = Math.min(currentSize[0], currentSize[1]);
+      const currentCornerRadius = Math.min(rawCornerRadius, maxCornerRadius);
 
       gl.useProgram(program);
 

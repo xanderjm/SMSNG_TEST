@@ -92,9 +92,12 @@ export const fragmentShaderSource = `
 
         for (int x = -2; x <= 2; x++) {
           for (int y = -2; y <= 2; y++) {
-            if (abs(x) > 1 || abs(y) > 1) {
-              vec2 offset = vec2(float(x), float(y)) * largeRadius * 0.5;
-              float weight = 1.0 - length(vec2(float(x), float(y))) * 0.15;
+            // Note: abs() only works with float in GLSL ES, so cast to float
+            float fx = float(x);
+            float fy = float(y);
+            if (abs(fx) > 1.0 || abs(fy) > 1.0) {
+              vec2 offset = vec2(fx, fy) * largeRadius * 0.5;
+              float weight = 1.0 - length(vec2(fx, fy)) * 0.15;
               extraBlur += getFill(uv + offset, edge + largeRadius) * weight;
               extraWeight += weight;
             }

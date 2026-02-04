@@ -227,6 +227,66 @@ curvePoints: [
 3. **Start simple**: Begin with 2 points, add more only if needed
 4. **Test both directions**: Effects work the same expanding or collapsing
 
+## GLSL ES Shader Guidelines
+
+When writing or modifying shaders, be aware of these WebGL/GLSL ES 2.0 limitations that can cause **silent failures** (black screen with no error):
+
+### Common Pitfalls
+
+1. **`abs()` only works with `float`, not `int`**
+   ```glsl
+   // WRONG - will fail silently
+   for (int x = -1; x <= 1; x++) {
+     if (abs(x) > 0) { ... }  // abs(int) doesn't exist in GLSL ES
+   }
+
+   // CORRECT - cast to float first
+   for (int x = -1; x <= 1; x++) {
+     float fx = float(x);
+     if (abs(fx) > 0.0) { ... }
+   }
+   ```
+
+2. **Loop bounds must be constant expressions**
+   ```glsl
+   // WRONG - dynamic loop bounds
+   for (int i = 0; i < someUniform; i++) { }
+
+   // CORRECT - constant bounds
+   for (int i = 0; i < 10; i++) { }
+   ```
+
+3. **Array indices must be constant or loop variables**
+   ```glsl
+   // WRONG - dynamic array index
+   float value = myArray[int(someFloat)];
+
+   // CORRECT - use loop variable
+   for (int i = 0; i < 4; i++) {
+     if (i == int(someFloat)) value = myArray[i];
+   }
+   ```
+
+4. **No implicit type conversion**
+   ```glsl
+   // WRONG
+   float x = 1;      // int to float
+   vec2 v = 0.5;     // float to vec2
+
+   // CORRECT
+   float x = 1.0;
+   vec2 v = vec2(0.5);
+   ```
+
+### Debugging Shader Issues
+
+If the canvas shows **black screen** after shader changes:
+1. Check browser console for WebGL errors
+2. Look for GLSL compilation errors in `compileShader()` output
+3. Review all `abs()`, `min()`, `max()` calls - they need float arguments
+4. Verify all loop bounds are constant
+5. Check for missing precision qualifiers (`precision highp float;`)
+
 ## File Structure
 
 ```

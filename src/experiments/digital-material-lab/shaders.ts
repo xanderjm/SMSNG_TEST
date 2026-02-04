@@ -130,8 +130,9 @@ export const trailAccumulateShaderSource = `
     vec3 fadedTrail = previousTrail.rgb * u_persistence;
 
     // Kill values below threshold to prevent permanent ghosting
+    // Higher threshold (0.03) ensures complete fade even at high persistence
     float maxChannel = max(max(fadedTrail.r, fadedTrail.g), fadedTrail.b);
-    fadedTrail = fadedTrail * step(0.01, maxChannel);
+    fadedTrail = fadedTrail * step(0.03, maxChannel);
 
     // Only add new trail when there's movement
     // smoothstep creates a gradual ramp: no trail when still, full trail when moving fast

@@ -30,14 +30,23 @@ interface Effect {
   max: number;                   // Maximum possible value (absolute)
   startT: number;                // When effect starts (0-1 of expansion)
   endT: number;                  // When effect ends (0-1 of expansion)
-  curvePoints: CurvePoint[];     // Multi-point curve defining the effect shape
+  curvePoints: CurvePoint[];     // Multi-point bezier curve defining the effect shape
 }
 
 interface CurvePoint {
   x: number;  // 0-1 position on timeline
   y: number;  // 0-1 effect value (maps to min-max range)
+  // Bezier handle offsets (relative to point position)
+  handleIn?: { x: number; y: number };   // Control handle coming in (from left)
+  handleOut?: { x: number; y: number };  // Control handle going out (to right)
 }
 ```
+
+**Bezier Handles**: Each point can have two bezier handles to control the curve shape:
+- `handleIn`: Controls the curve entering the point (from the previous point)
+- `handleOut`: Controls the curve leaving the point (toward the next point)
+- Handle `x` is relative to segment width (0 to 1 for out, -1 to 0 for in)
+- Handle `y` is absolute offset from point's y value (-1 to 1)
 
 ### How Values Are Calculated
 
@@ -46,11 +55,12 @@ interface CurvePoint {
    - After `endT`: effect stays at last point's Y value
    - Between: effect follows the multi-point curve
 
-2. **Multi-Point Curve**: Uses Catmull-Rom interpolation for smooth curves
+2. **Multi-Point Bezier Curve**: Uses cubic bezier interpolation between points
    - First point (green) = contracted state value
    - Last point (red) = expanded state value
+   - Each point has draggable bezier handles (small gray circles) for curve shaping
    - **Double-click** on curve area to add intermediate points
-   - **Double-click** on a point to remove it (except start/end)
+   - **Drag a point outside the editor bounds** to remove it (except start/end)
    - Allows complex curves like parabolas, S-curves, multi-peak effects
 
 3. **Final Value**: `min + (max - min) * curveOutput`
@@ -158,16 +168,18 @@ const myEffect = animConfig.effects.find(e => e.id === 'myNewEffect');
 - **Expanded**: Actual value when `expansionProgress = 1`
 
 ### Timeline Position
-- **Start**: When effect begins transitioning
-- **End**: When effect finishes transitioning
+- **Start (green line)**: When effect begins transitioning - drag directly
+- **End (red line)**: When effect finishes transitioning - drag directly
+- Lines are directly draggable (no separate slider controls)
 
-### Multi-Point Curve Editor
-- **Green point**: Start value (fixed at x=0)
-- **Red point**: End value (fixed at x=1)
-- **Black points**: Intermediate keyframes
-- **Double-click empty area**: Add new point
-- **Double-click existing point**: Remove point (except endpoints)
-- **Drag points**: Adjust position and value
+### Multi-Point Bezier Curve Editor
+- **Green point**: Start value (fixed at x=0, Y-axis only)
+- **Red point**: End value (fixed at x=1, Y-axis only)
+- **White points**: Intermediate keyframes (fully draggable)
+- **Gray circles**: Bezier handles for controlling curve shape
+- **Double-click empty area**: Add new point with default handles
+- **Drag point outside editor bounds**: Remove point (except endpoints, turns red when ready to delete)
+- **Drag handles**: Adjust bezier curve shape between points
 
 ## Curve Types
 
@@ -220,10 +232,10 @@ curvePoints: [
 ```
 digital-material-lab/
 ├── index.tsx                 # Main component, Effect interface, calculateEffectValue
-├── animation.ts              # Bezier curves for master animation
-├── SettingsPanel.tsx         # UI components including EffectEditor
-├── MultiPointCurveEditor.tsx # Multi-point curve editor with Catmull-Rom
-├── BezierCurveEditor.tsx     # Bezier curve editor for master curve
+├── animation.ts              # Bezier curves for master animation timing
+├── SettingsPanel.tsx         # UI components including EffectEditor, TimelineRange
+├── MultiPointCurveEditor.tsx # Multi-point bezier curve editor with handles
+├── BezierCurveEditor.tsx     # Bezier curve editor for master timing curve
 ├── shaders.ts                # GLSL shaders
 ├── webgl.ts                  # WebGL utilities
 └── ARCHITECTURE.md           # This file
@@ -274,6 +286,8 @@ The effect system is designed to be reusable across different animated component
 export interface CurvePoint {
   x: number;  // 0-1 timeline position
   y: number;  // 0-1 effect value
+  handleIn?: { x: number; y: number };   // Bezier handle (incoming)
+  handleOut?: { x: number; y: number };  // Bezier handle (outgoing)
 }
 
 export interface Effect {
@@ -289,7 +303,7 @@ export interface Effect {
 
 export interface AnimationConfig {
   duration: number;
-  curve: [number, number, number, number];  // Bezier control points
+  curve: [number, number, number, number];  // Master timing bezier control points
   effects: Effect[];
 }
 ```
@@ -301,7 +315,7 @@ export interface AnimationConfig {
 export function calculateEffectValue(effect: Effect, progress: number): number;
 
 // @/lib/effects/interpolation.ts
-export function evaluateCatmullRom(points: CurvePoint[], x: number): number;
+export function evaluateBezierCurve(points: CurvePoint[], x: number): number;
 export function cubicBezier(t: number, curve: BezierCurve): number;
 ```
 
@@ -312,10 +326,10 @@ export function cubicBezier(t: number, curve: BezierCurve): number;
 // Complete effect editing UI with curve, range, timeline
 
 // @/components/effects/MultiPointCurveEditor.tsx
-// Reusable curve editor with Catmull-Rom interpolation
+// Reusable multi-point bezier curve editor with handles
 
 // @/components/effects/BezierCurveEditor.tsx
-// Reusable bezier curve editor for timing functions
+// Reusable bezier curve editor for master timing functions
 ```
 
 ### Component Integration Pattern

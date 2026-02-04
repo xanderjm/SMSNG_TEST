@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { ChevronDown, ChevronRight, Copy, Download, Upload } from 'lucide-react';
 import type { MaterialUniforms, AnimationConfig, Effect } from './index';
 import { MultiPointCurveEditor } from './MultiPointCurveEditor';
@@ -60,6 +60,41 @@ interface TimelineRangeProps {
 }
 
 function TimelineRange({ startT, endT, onStartChange, onEndChange }: TimelineRangeProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [dragging, setDragging] = useState<'start' | 'end' | null>(null);
+
+  const handleMouseDown = (handle: 'start' | 'end') => (e: React.MouseEvent) => {
+    e.preventDefault();
+    setDragging(handle);
+  };
+
+  useEffect(() => {
+    if (!dragging) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!containerRef.current) return;
+      const rect = containerRef.current.getBoundingClientRect();
+      const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+
+      if (dragging === 'start') {
+        if (x < endT - 0.02) onStartChange(x);
+      } else {
+        if (x > startT + 0.02) onEndChange(x);
+      }
+    };
+
+    const handleMouseUp = () => {
+      setDragging(null);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [dragging, startT, endT, onStartChange, onEndChange]);
+
   return (
     <div className="mb-4">
       <div className="flex justify-between items-center mb-2">
@@ -69,71 +104,53 @@ function TimelineRange({ startT, endT, onStartChange, onEndChange }: TimelineRan
         </span>
       </div>
 
-      {/* Visual timeline bar */}
-      <div className="relative h-6 bg-neutral-800 rounded mb-3">
+      {/* Interactive timeline bar */}
+      <div
+        ref={containerRef}
+        className="relative h-8 bg-neutral-800 rounded cursor-pointer select-none"
+      >
         {/* Active range */}
         <div
-          className="absolute top-1 bottom-1 bg-neutral-600 rounded"
+          className="absolute top-2 bottom-2 bg-neutral-600 rounded"
           style={{
             left: `${startT * 100}%`,
             width: `${(endT - startT) * 100}%`,
           }}
         />
-        {/* Start handle */}
+
+        {/* Start handle - directly draggable */}
         <div
-          className="absolute top-0 bottom-0 w-0.5 bg-emerald-500"
+          className="absolute top-0 bottom-0 w-3 -ml-1.5 flex items-center justify-center cursor-ew-resize group"
           style={{ left: `${startT * 100}%` }}
-        />
-        {/* End handle */}
+          onMouseDown={handleMouseDown('start')}
+        >
+          <div className={`w-1 h-full rounded-full transition-colors ${
+            dragging === 'start' ? 'bg-emerald-400' : 'bg-emerald-500 group-hover:bg-emerald-400'
+          }`} />
+        </div>
+
+        {/* End handle - directly draggable */}
         <div
-          className="absolute top-0 bottom-0 w-0.5 bg-rose-500"
+          className="absolute top-0 bottom-0 w-3 -ml-1.5 flex items-center justify-center cursor-ew-resize group"
           style={{ left: `${endT * 100}%` }}
-        />
+          onMouseDown={handleMouseDown('end')}
+        >
+          <div className={`w-1 h-full rounded-full transition-colors ${
+            dragging === 'end' ? 'bg-rose-400' : 'bg-rose-500 group-hover:bg-rose-400'
+          }`} />
+        </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
-        <div className="flex items-center gap-2">
-          <div className="w-2 h-2 rounded-full bg-emerald-500" />
-          <input
-            type="range"
-            min={0}
-            max={1}
-            step={0.01}
-            value={startT}
-            onChange={(e) => {
-              const newStart = parseFloat(e.target.value);
-              if (newStart < endT) onStartChange(newStart);
-            }}
-            className="flex-1 h-1 bg-neutral-700 rounded-full appearance-none cursor-pointer
-                       [&::-webkit-slider-thumb]:appearance-none
-                       [&::-webkit-slider-thumb]:w-2.5
-                       [&::-webkit-slider-thumb]:h-2.5
-                       [&::-webkit-slider-thumb]:rounded-full
-                       [&::-webkit-slider-thumb]:bg-emerald-500
-                       [&::-webkit-slider-thumb]:cursor-pointer"
-          />
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="w-2 h-2 rounded-full bg-rose-500" />
-          <input
-            type="range"
-            min={0}
-            max={1}
-            step={0.01}
-            value={endT}
-            onChange={(e) => {
-              const newEnd = parseFloat(e.target.value);
-              if (newEnd > startT) onEndChange(newEnd);
-            }}
-            className="flex-1 h-1 bg-neutral-700 rounded-full appearance-none cursor-pointer
-                       [&::-webkit-slider-thumb]:appearance-none
-                       [&::-webkit-slider-thumb]:w-2.5
-                       [&::-webkit-slider-thumb]:h-2.5
-                       [&::-webkit-slider-thumb]:rounded-full
-                       [&::-webkit-slider-thumb]:bg-rose-500
-                       [&::-webkit-slider-thumb]:cursor-pointer"
-          />
-        </div>
+      {/* Legend */}
+      <div className="flex justify-between mt-2 text-[9px] text-neutral-500">
+        <span className="flex items-center gap-1">
+          <span className="w-2 h-2 rounded-full bg-emerald-500" />
+          Start
+        </span>
+        <span className="flex items-center gap-1">
+          End
+          <span className="w-2 h-2 rounded-full bg-rose-500" />
+        </span>
       </div>
     </div>
   );
@@ -238,7 +255,7 @@ function EffectEditor({ effect, onChange }: EffectEditorProps) {
                 <MultiPointCurveEditor
                   points={effect.curvePoints}
                   onChange={(curvePoints) => onChange({ ...effect, curvePoints })}
-                  width={280}
+                  width={260}
                   height={160}
                 />
               </div>
@@ -378,7 +395,7 @@ export function SettingsPanel({
             <BezierCurveEditor
               value={animConfig.curve}
               onChange={(curve) => onAnimConfigChange({ ...animConfig, curve })}
-              width={280}
+              width={260}
               height={120}
             />
             <div className="flex flex-wrap gap-2 mt-3">

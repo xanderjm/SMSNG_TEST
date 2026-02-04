@@ -107,6 +107,19 @@ const defaultAnimConfig: AnimationConfig = {
         { x: 1, y: 1 },       // End: expanded state (max value)
       ],
     },
+    {
+      id: 'focus',
+      name: 'Focus',
+      enabled: true,
+      min: 0,                 // No blur (sharp)
+      max: 20,                // Maximum blur amount in pixels
+      startT: 0,              // Effect starts at beginning
+      endT: 1,                // Effect ends at full expansion
+      curvePoints: [
+        { x: 0, y: 1 },       // Start: blurred (out of focus)
+        { x: 1, y: 0 },       // End: sharp (in focus)
+      ],
+    },
   ],
 };
 
@@ -234,6 +247,12 @@ export function DigitalMaterialLab() {
       const maxCornerRadius = Math.min(currentSize[0], currentSize[1]);
       const currentCornerRadius = Math.min(rawCornerRadius, maxCornerRadius);
 
+      // Calculate focus (blur) effect
+      const focusEffect = animConfig.effects.find(e => e.id === 'focus');
+      const blurAmount = focusEffect
+        ? calculateEffectValue(focusEffect, expansionProgress)
+        : 0;
+
       gl.useProgram(program);
 
       const setUniform1f = (name: string, value: number) => {
@@ -254,6 +273,7 @@ export function DigitalMaterialLab() {
       // Geometry - use calculated effect values
       setUniform2f('u_rectSize', currentSize[0], currentSize[1]);
       setUniform1f('u_cornerRadius', currentCornerRadius);
+      setUniform1f('u_blur', blurAmount);
 
       // Digital Material
       setUniform1f('u_viscosity', uniforms.viscosity);

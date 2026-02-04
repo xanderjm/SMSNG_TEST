@@ -367,6 +367,7 @@ export function SettingsPanel({
   ];
 
   const cornerRadiusEffect = animConfig.effects.find(e => e.id === 'cornerRadius');
+  const focusEffect = animConfig.effects.find(e => e.id === 'focus');
 
   return (
     <div className="w-[340px] bg-neutral-900 border-l border-neutral-800 flex flex-col overflow-hidden">
@@ -419,6 +420,14 @@ export function SettingsPanel({
               effect={cornerRadiusEffect}
               onChange={(effect) => updateEffect('cornerRadius', effect)}
             />
+          )}
+          {focusEffect && (
+            <div className="mt-4">
+              <EffectEditor
+                effect={focusEffect}
+                onChange={(effect) => updateEffect('focus', effect)}
+              />
+            </div>
           )}
         </Section>
 

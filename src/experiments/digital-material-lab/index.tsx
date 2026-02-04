@@ -236,7 +236,8 @@ export function DigitalMaterialLab() {
 
   // Trail effect - size history for ghost shapes
   const sizeHistoryRef = useRef<[number, number][]>([]);
-  const TRAIL_HISTORY_LENGTH = 8;  // Store more frames, sample 4 for display
+  const MIN_TRAIL_LENGTH = 4;   // Minimum frames at persistence=0
+  const MAX_TRAIL_LENGTH = 32;  // Maximum frames at persistence=1
 
   // Background image texture ref
   const backgroundTextureRef = useRef<WebGLTexture | null>(null);
@@ -548,11 +549,14 @@ export function DigitalMaterialLab() {
       setUniform1f('u_blur', blurAmount);
 
       // Update size history for trail effect
+      // Persistence controls history length: 0 = short trails, 1 = long trails
+      const historyLength = Math.round(MIN_TRAIL_LENGTH + trailPersistence * (MAX_TRAIL_LENGTH - MIN_TRAIL_LENGTH));
+
       if (trailEnabled) {
         // Add current size to history
         sizeHistoryRef.current.push([...currentSize]);
-        // Keep only the last N frames
-        if (sizeHistoryRef.current.length > TRAIL_HISTORY_LENGTH) {
+        // Keep only the last N frames based on persistence
+        while (sizeHistoryRef.current.length > historyLength) {
           sizeHistoryRef.current.shift();
         }
       } else {

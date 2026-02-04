@@ -137,28 +137,28 @@ export const fragmentShaderSource = `
       float ghost0 = getFillAtSize(uv, u_trailSize0, u_cornerRadius, trailEdge);
       if (ghost0 > 0.01) {
         vec3 ghostColor0 = sampleColorRamp(0.0);
-        color = color + ghostColor0 * ghost0 * u_trailAmount * 0.15;
+        color = color + ghostColor0 * ghost0 * u_trailAmount * 0.3;
       }
 
       // Ghost 1
       float ghost1 = getFillAtSize(uv, u_trailSize1, u_cornerRadius, trailEdge);
       if (ghost1 > 0.01) {
         vec3 ghostColor1 = sampleColorRamp(0.33);
-        color = color + ghostColor1 * ghost1 * u_trailAmount * 0.25;
+        color = color + ghostColor1 * ghost1 * u_trailAmount * 0.45;
       }
 
       // Ghost 2
       float ghost2 = getFillAtSize(uv, u_trailSize2, u_cornerRadius, trailEdge);
       if (ghost2 > 0.01) {
         vec3 ghostColor2 = sampleColorRamp(0.66);
-        color = color + ghostColor2 * ghost2 * u_trailAmount * 0.35;
+        color = color + ghostColor2 * ghost2 * u_trailAmount * 0.6;
       }
 
       // Ghost 3 (newest ghost) - brightest
       float ghost3 = getFillAtSize(uv, u_trailSize3, u_cornerRadius, trailEdge);
       if (ghost3 > 0.01) {
         vec3 ghostColor3 = sampleColorRamp(1.0);
-        color = color + ghostColor3 * ghost3 * u_trailAmount * 0.5;
+        color = color + ghostColor3 * ghost3 * u_trailAmount * 0.8;
       }
     }
 

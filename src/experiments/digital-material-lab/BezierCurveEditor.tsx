@@ -105,13 +105,13 @@ export function BezierCurveEditor({
         ref={svgRef}
         width={width}
         height={height}
-        className="bg-white rounded border border-neutral-200"
+        className="bg-neutral-800 rounded border border-neutral-700"
         style={{ cursor: dragging ? 'grabbing' : 'default' }}
       >
         {/* Grid */}
         <defs>
           <pattern
-            id="grid"
+            id="grid-bezier"
             width={innerWidth / 4}
             height={innerHeight / 4}
             patternUnits="userSpaceOnUse"
@@ -121,7 +121,7 @@ export function BezierCurveEditor({
             <path
               d={`M ${innerWidth / 4} 0 L 0 0 0 ${innerHeight / 4}`}
               fill="none"
-              stroke="#f5f5f5"
+              stroke="#404040"
               strokeWidth="1"
             />
           </pattern>
@@ -131,7 +131,7 @@ export function BezierCurveEditor({
           y={padding}
           width={innerWidth}
           height={innerHeight}
-          fill="url(#grid)"
+          fill="url(#grid-bezier)"
         />
 
         {/* Diagonal reference line (from startY to endY) */}
@@ -140,7 +140,7 @@ export function BezierCurveEditor({
           y1={p0.y}
           x2={p3.x}
           y2={p3.y}
-          stroke="#e5e5e5"
+          stroke="#525252"
           strokeWidth="1"
           strokeDasharray="4 4"
         />
@@ -156,7 +156,7 @@ export function BezierCurveEditor({
               stroke="#10b981"
               strokeWidth="1"
               strokeDasharray="2 2"
-              opacity="0.3"
+              opacity="0.4"
             />
             <line
               x1={padding}
@@ -166,7 +166,7 @@ export function BezierCurveEditor({
               stroke="#f43f5e"
               strokeWidth="1"
               strokeDasharray="2 2"
-              opacity="0.3"
+              opacity="0.4"
             />
           </>
         )}
@@ -177,25 +177,25 @@ export function BezierCurveEditor({
           y1={p0.y}
           x2={p1.x}
           y2={p1.y}
-          stroke="#a3a3a3"
+          stroke="#737373"
           strokeWidth="1"
-          opacity="0.5"
+          opacity="0.6"
         />
         <line
           x1={p3.x}
           y1={p3.y}
           x2={p2.x}
           y2={p2.y}
-          stroke="#a3a3a3"
+          stroke="#737373"
           strokeWidth="1"
-          opacity="0.5"
+          opacity="0.6"
         />
 
         {/* Bezier curve */}
         <path
           d={pathD}
           fill="none"
-          stroke="#171717"
+          stroke="#e5e5e5"
           strokeWidth="2"
           strokeLinecap="round"
         />
@@ -205,8 +205,8 @@ export function BezierCurveEditor({
           cx={p0.x}
           cy={p0.y}
           r={hasAdjustableEndpoints ? 5 : 4}
-          fill={hasAdjustableEndpoints ? '#10b981' : 'white'}
-          stroke={hasAdjustableEndpoints ? 'white' : '#171717'}
+          fill={hasAdjustableEndpoints ? '#10b981' : '#e5e5e5'}
+          stroke="#262626"
           strokeWidth="2"
           style={{ cursor: hasAdjustableEndpoints ? 'ns-resize' : 'default' }}
           onMouseDown={handleMouseDown('p0')}
@@ -217,8 +217,8 @@ export function BezierCurveEditor({
           cx={p3.x}
           cy={p3.y}
           r={hasAdjustableEndpoints ? 5 : 4}
-          fill={hasAdjustableEndpoints ? '#f43f5e' : 'white'}
-          stroke={hasAdjustableEndpoints ? 'white' : '#171717'}
+          fill={hasAdjustableEndpoints ? '#f43f5e' : '#e5e5e5'}
+          stroke="#262626"
           strokeWidth="2"
           style={{ cursor: hasAdjustableEndpoints ? 'ns-resize' : 'default' }}
           onMouseDown={handleMouseDown('p3')}
@@ -229,8 +229,8 @@ export function BezierCurveEditor({
           cx={p1.x}
           cy={p1.y}
           r="4"
-          fill="#171717"
-          stroke="white"
+          fill="#e5e5e5"
+          stroke="#262626"
           strokeWidth="2"
           style={{ cursor: 'grab' }}
           onMouseDown={handleMouseDown('p1')}
@@ -241,8 +241,8 @@ export function BezierCurveEditor({
           cx={p2.x}
           cy={p2.y}
           r="4"
-          fill="#171717"
-          stroke="white"
+          fill="#e5e5e5"
+          stroke="#262626"
           strokeWidth="2"
           style={{ cursor: 'grab' }}
           onMouseDown={handleMouseDown('p2')}
@@ -250,11 +250,11 @@ export function BezierCurveEditor({
       </svg>
 
       {/* Numeric values */}
-      <div className="flex justify-between mt-2 text-[9px] font-mono text-neutral-400">
+      <div className="flex justify-between mt-2 text-[9px] font-mono text-neutral-500">
         {hasAdjustableEndpoints ? (
           <>
-            <span className="text-emerald-600">Start: {startY.toFixed(2)}</span>
-            <span className="text-rose-600">End: {endY.toFixed(2)}</span>
+            <span className="text-emerald-500">Start: {startY.toFixed(2)}</span>
+            <span className="text-rose-500">End: {endY.toFixed(2)}</span>
           </>
         ) : (
           <>

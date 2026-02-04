@@ -185,14 +185,14 @@ export function MultiPointCurveEditor({
         ref={svgRef}
         width={width}
         height={height}
-        className="bg-white rounded border border-neutral-200"
+        className="bg-neutral-800 rounded border border-neutral-700"
         style={{ cursor: draggingIndex !== null ? 'grabbing' : 'crosshair' }}
         onDoubleClick={handleSvgDoubleClick}
       >
         {/* Grid */}
         <defs>
           <pattern
-            id="grid-light"
+            id="grid-dark"
             width={innerWidth / 4}
             height={innerHeight / 4}
             patternUnits="userSpaceOnUse"
@@ -202,7 +202,7 @@ export function MultiPointCurveEditor({
             <path
               d={`M ${innerWidth / 4} 0 L 0 0 0 ${innerHeight / 4}`}
               fill="none"
-              stroke="#f0f0f0"
+              stroke="#404040"
               strokeWidth="1"
             />
           </pattern>
@@ -212,7 +212,7 @@ export function MultiPointCurveEditor({
           y={padding}
           width={innerWidth}
           height={innerHeight}
-          fill="url(#grid-light)"
+          fill="url(#grid-dark)"
         />
 
         {/* Axis lines */}
@@ -221,7 +221,7 @@ export function MultiPointCurveEditor({
           y1={toSvgY(0)}
           x2={padding + innerWidth}
           y2={toSvgY(0)}
-          stroke="#e5e5e5"
+          stroke="#525252"
           strokeWidth="1"
         />
         <line
@@ -229,7 +229,7 @@ export function MultiPointCurveEditor({
           y1={toSvgY(1)}
           x2={padding + innerWidth}
           y2={toSvgY(1)}
-          stroke="#e5e5e5"
+          stroke="#525252"
           strokeWidth="1"
         />
 
@@ -239,7 +239,7 @@ export function MultiPointCurveEditor({
           y1={toSvgY(points[0]?.y ?? 0)}
           x2={toSvgX(1)}
           y2={toSvgY(points[points.length - 1]?.y ?? 1)}
-          stroke="#e5e5e5"
+          stroke="#525252"
           strokeWidth="1"
           strokeDasharray="4 4"
         />
@@ -248,7 +248,7 @@ export function MultiPointCurveEditor({
         <path
           d={pathD}
           fill="none"
-          stroke="#171717"
+          stroke="#e5e5e5"
           strokeWidth="2"
           strokeLinecap="round"
         />
@@ -268,7 +268,7 @@ export function MultiPointCurveEditor({
                   y1={padding}
                   x2={toSvgX(point.x)}
                   y2={padding + innerHeight}
-                  stroke="#e5e5e5"
+                  stroke="#525252"
                   strokeWidth="1"
                   strokeDasharray="2 2"
                 />
@@ -277,8 +277,8 @@ export function MultiPointCurveEditor({
                 cx={toSvgX(point.x)}
                 cy={toSvgY(point.y)}
                 r={isEndpoint ? 5 : 4}
-                fill={isStart ? '#10b981' : isEnd ? '#f43f5e' : '#171717'}
-                stroke="white"
+                fill={isStart ? '#10b981' : isEnd ? '#f43f5e' : '#e5e5e5'}
+                stroke="#262626"
                 strokeWidth="2"
                 style={{ cursor: isEndpoint ? 'ns-resize' : 'grab' }}
                 onMouseDown={handleMouseDown(index)}
@@ -289,7 +289,7 @@ export function MultiPointCurveEditor({
       </svg>
 
       {/* Instructions */}
-      <div className="flex justify-between mt-2 text-[9px] text-neutral-400">
+      <div className="flex justify-between mt-2 text-[9px] text-neutral-500">
         <span>Double-click to add point</span>
         <span>Double-click point to remove</span>
       </div>

@@ -128,89 +128,92 @@ const defaultUniforms: MaterialUniforms = {
   gravAttention: 0.0,
 };
 
+// Effect templates - available effects that can be added
+export const EFFECT_TEMPLATES: Record<string, Effect> = {
+  cornerRadius: {
+    id: 'cornerRadius',
+    name: 'Corner Shape',
+    enabled: true,            // Enabled when added
+    mode: 'state',            // Follows expansion state (different when expanded vs contracted)
+    startT: 0,                // Effect starts at beginning of expansion
+    endT: 1,                  // Effect ends at full expansion
+    curvePoints: [            // Single shared curve for all variables
+      { x: 0, y: 0 },         // Start: contracted state (curve = 0)
+      { x: 1, y: 1 },         // End: expanded state (curve = 1)
+    ],
+    variables: [
+      {
+        id: 'roundness',
+        name: 'Roundness',
+        min: 0.01,              // Value at curve=0 (contracted)
+        max: 0.15,              // Value at curve=1 (expanded)
+      },
+      {
+        id: 'squircle',
+        name: 'Squircle',
+        min: 2.0,               // Value at curve=0: standard circle (n=2)
+        max: 5.0,               // Value at curve=1: iOS-style squircle (n=5)
+      },
+    ],
+  },
+  focus: {
+    id: 'focus',
+    name: 'Focus',
+    enabled: true,            // Enabled when added
+    mode: 'animate',          // Always plays forward on each trigger
+    startT: 0,                // Effect starts at beginning
+    endT: 1,                  // Effect ends at full expansion
+    curvePoints: [            // Single curve for blur effect
+      { x: 0, y: 1 },         // Start: curve=1 (max blur)
+      { x: 1, y: 0 },         // End: curve=0 (no blur)
+    ],
+    variables: [
+      {
+        id: 'amount',
+        name: 'Blur Amount',
+        min: 0,                 // No blur (sharp)
+        max: 20,                // Maximum blur amount in pixels
+      },
+    ],
+  },
+  trail: {
+    id: 'trail',
+    name: 'Trail',
+    enabled: true,            // Enabled when added
+    mode: 'animate',          // Trails follow animation forward
+    startT: 0,
+    endT: 1,
+    curvePoints: [
+      { x: 0, y: 1 },         // Start: full trail effect
+      { x: 1, y: 0 },         // End: trails fade out
+    ],
+    variables: [
+      {
+        id: 'persistence',
+        name: 'Persistence',
+        min: 0.0,               // No persistence (trails disappear instantly)
+        max: 0.95,              // High persistence (trails linger)
+      },
+      {
+        id: 'amount',
+        name: 'Amount',
+        min: 0,                 // No trails
+        max: 1.0,               // Full trail intensity
+      },
+    ],
+    colorRamp: [
+      { position: 0.0, color: [0.0, 0.8, 1.0] },    // Cyan
+      { position: 0.33, color: [0.5, 0.0, 1.0] },   // Purple
+      { position: 0.66, color: [1.0, 0.2, 0.5] },   // Pink
+      { position: 1.0, color: [1.0, 1.0, 1.0] },    // White (newest)
+    ],
+  },
+};
+
 const defaultAnimConfig: AnimationConfig = {
   duration: 800,
   curve: [0.34, 1.56, 0.64, 1],
-  effects: [
-    {
-      id: 'cornerRadius',
-      name: 'Corner Shape',
-      enabled: false,         // Off by default
-      mode: 'state',          // Follows expansion state (different when expanded vs contracted)
-      startT: 0,              // Effect starts at beginning of expansion
-      endT: 1,                // Effect ends at full expansion
-      curvePoints: [          // Single shared curve for all variables
-        { x: 0, y: 0 },       // Start: contracted state (curve = 0)
-        { x: 1, y: 1 },       // End: expanded state (curve = 1)
-      ],
-      variables: [
-        {
-          id: 'roundness',
-          name: 'Roundness',
-          min: 0.01,            // Value at curve=0 (contracted)
-          max: 0.15,            // Value at curve=1 (expanded)
-        },
-        {
-          id: 'squircle',
-          name: 'Squircle',
-          min: 2.0,             // Value at curve=0: standard circle (n=2)
-          max: 5.0,             // Value at curve=1: iOS-style squircle (n=5)
-        },
-      ],
-    },
-    {
-      id: 'focus',
-      name: 'Focus',
-      enabled: false,         // Off by default
-      mode: 'animate',        // Always plays forward on each trigger
-      startT: 0,              // Effect starts at beginning
-      endT: 1,                // Effect ends at full expansion
-      curvePoints: [          // Single curve for blur effect
-        { x: 0, y: 1 },       // Start: curve=1 (max blur)
-        { x: 1, y: 0 },       // End: curve=0 (no blur)
-      ],
-      variables: [
-        {
-          id: 'amount',
-          name: 'Blur Amount',
-          min: 0,               // No blur (sharp)
-          max: 20,              // Maximum blur amount in pixels
-        },
-      ],
-    },
-    {
-      id: 'trail',
-      name: 'Trail',
-      enabled: false,         // Off by default
-      mode: 'animate',        // Trails follow animation forward
-      startT: 0,
-      endT: 1,
-      curvePoints: [
-        { x: 0, y: 1 },       // Start: full trail effect
-        { x: 1, y: 0 },       // End: trails fade out
-      ],
-      variables: [
-        {
-          id: 'persistence',
-          name: 'Persistence',
-          min: 0.0,             // No persistence (trails disappear instantly)
-          max: 0.95,            // High persistence (trails linger)
-        },
-        {
-          id: 'amount',
-          name: 'Amount',
-          min: 0,               // No trails
-          max: 1.0,             // Full trail intensity
-        },
-      ],
-      colorRamp: [
-        { position: 0.0, color: [0.0, 0.8, 1.0] },    // Cyan
-        { position: 0.33, color: [0.5, 0.0, 1.0] },   // Purple
-        { position: 0.66, color: [1.0, 0.2, 0.5] },   // Pink
-        { position: 1.0, color: [1.0, 1.0, 1.0] },    // White (newest)
-      ],
-    },
-  ],
+  effects: [],  // Empty by default - effects are added by user
 };
 
 export function DigitalMaterialLab() {
@@ -675,7 +678,19 @@ export function DigitalMaterialLab() {
         try {
           const data = JSON.parse(event.target?.result as string);
           if (data.uniforms) setUniforms(data.uniforms);
-          if (data.animConfig) setAnimConfig(data.animConfig);
+          if (data.animConfig) {
+            // Intelligently merge effects:
+            // - If imported config has effects, use those (preserving customizations)
+            // - If imported has no effects or empty array, preserve current effects
+            setAnimConfig(prev => {
+              const importedConfig = { ...data.animConfig };
+              if (!importedConfig.effects || importedConfig.effects.length === 0) {
+                // Old preset or preset with no effects - keep current effects
+                importedConfig.effects = prev.effects;
+              }
+              return importedConfig;
+            });
+          }
         } catch (err) {
           console.error('Failed to parse preset file:', err);
         }

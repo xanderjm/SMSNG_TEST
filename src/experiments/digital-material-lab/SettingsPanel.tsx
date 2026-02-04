@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { ChevronDown, ChevronRight, Copy, Download, Upload, Circle, Square, Image, X } from 'lucide-react';
+import { ChevronDown, ChevronRight, Copy, Download, Upload, Circle, Square, Image, X, Plus, Trash2 } from 'lucide-react';
 import type { MaterialUniforms, AnimationConfig, Effect, EffectVariable, ViewportMode, ColorStop } from './index';
-import { CANVAS_WIDTH, CANVAS_HEIGHT } from './index';
+import { CANVAS_WIDTH, CANVAS_HEIGHT, EFFECT_TEMPLATES } from './index';
 import { MultiPointCurveEditor } from './MultiPointCurveEditor';
 import { BezierCurveEditor } from './BezierCurveEditor';
 import { CURVES } from './animation';
@@ -346,9 +346,10 @@ function VariableRange({ variable, curveStart, curveEnd, onChange }: VariableRan
 interface EffectEditorProps {
   effect: Effect;
   onChange: (effect: Effect) => void;
+  onRemove: () => void;
 }
 
-function EffectEditor({ effect, onChange }: EffectEditorProps) {
+function EffectEditor({ effect, onChange, onRemove }: EffectEditorProps) {
   const [showCurve, setShowCurve] = useState(true);
 
   const updateVariable = (variableId: string, updatedVariable: EffectVariable) => {
@@ -374,18 +375,27 @@ function EffectEditor({ effect, onChange }: EffectEditorProps) {
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <span className="text-sm font-medium text-neutral-200">{effect.name}</span>
-        <button
-          onClick={() => onChange({ ...effect, enabled: !effect.enabled })}
-          className={`w-10 h-5 rounded-full transition-colors relative ${
-            effect.enabled ? 'bg-neutral-500' : 'bg-neutral-700'
-          }`}
-        >
-          <div
-            className={`absolute top-0.5 w-4 h-4 rounded-full bg-neutral-200 transition-transform ${
-              effect.enabled ? 'translate-x-5' : 'translate-x-0.5'
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => onChange({ ...effect, enabled: !effect.enabled })}
+            className={`w-10 h-5 rounded-full transition-colors relative ${
+              effect.enabled ? 'bg-neutral-500' : 'bg-neutral-700'
             }`}
-          />
-        </button>
+          >
+            <div
+              className={`absolute top-0.5 w-4 h-4 rounded-full bg-neutral-200 transition-transform ${
+                effect.enabled ? 'translate-x-5' : 'translate-x-0.5'
+              }`}
+            />
+          </button>
+          <button
+            onClick={onRemove}
+            className="p-1.5 rounded text-neutral-500 hover:text-red-400 hover:bg-neutral-700 transition-colors"
+            title="Remove effect"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
+        </div>
       </div>
 
       {effect.enabled && (
@@ -540,6 +550,26 @@ export function SettingsPanel({
     onAnimConfigChange({ ...animConfig, effects: newEffects });
   };
 
+  const addEffect = (effectId: string) => {
+    const template = EFFECT_TEMPLATES[effectId];
+    if (!template) return;
+    // Check if effect already exists
+    if (animConfig.effects.some(e => e.id === effectId)) return;
+    // Deep clone the template
+    const newEffect = JSON.parse(JSON.stringify(template));
+    onAnimConfigChange({ ...animConfig, effects: [...animConfig.effects, newEffect] });
+  };
+
+  const removeEffect = (effectId: string) => {
+    const newEffects = animConfig.effects.filter(e => e.id !== effectId);
+    onAnimConfigChange({ ...animConfig, effects: newEffects });
+  };
+
+  // Get available effects (templates not yet added)
+  const availableEffects = Object.entries(EFFECT_TEMPLATES).filter(
+    ([id]) => !animConfig.effects.some(e => e.id === id)
+  );
+
   const handleExport = () => {
     const data = {
       uniforms,
@@ -566,7 +596,17 @@ export function SettingsPanel({
         try {
           const data = JSON.parse(e.target?.result as string);
           if (data.uniforms) onUniformsChange(data.uniforms);
-          if (data.animConfig) onAnimConfigChange(data.animConfig);
+          if (data.animConfig) {
+            // Intelligently merge effects:
+            // - If imported config has effects, use those (preserving customizations)
+            // - If imported has no effects or empty array, preserve current effects
+            const importedConfig = { ...data.animConfig };
+            if (!importedConfig.effects || importedConfig.effects.length === 0) {
+              // Old preset or preset with no effects - keep current effects
+              importedConfig.effects = animConfig.effects;
+            }
+            onAnimConfigChange(importedConfig);
+          }
         } catch (err) {
           console.error('Failed to parse preset file');
         }
@@ -587,10 +627,6 @@ export function SettingsPanel({
     { name: 'elastic', curve: CURVES.elastic },
     { name: 'sharp', curve: CURVES.sharp },
   ];
-
-  const cornerRadiusEffect = animConfig.effects.find(e => e.id === 'cornerRadius');
-  const focusEffect = animConfig.effects.find(e => e.id === 'focus');
-  const trailEffect = animConfig.effects.find(e => e.id === 'trail');
 
   const handleBackgroundChange = (image: string | undefined) => {
     onAnimConfigChange({ ...animConfig, backgroundImage: image });
@@ -714,26 +750,49 @@ export function SettingsPanel({
 
         {/* Effects Section */}
         <Section title="Effects">
-          {cornerRadiusEffect && (
-            <EffectEditor
-              effect={cornerRadiusEffect}
-              onChange={(effect) => updateEffect('cornerRadius', effect)}
-            />
-          )}
-          {focusEffect && (
-            <div className="mt-4">
+          {/* List of active effects */}
+          {animConfig.effects.map((effect, index) => (
+            <div key={effect.id} className={index > 0 ? 'mt-4' : ''}>
               <EffectEditor
-                effect={focusEffect}
-                onChange={(effect) => updateEffect('focus', effect)}
+                effect={effect}
+                onChange={(updatedEffect) => updateEffect(effect.id, updatedEffect)}
+                onRemove={() => removeEffect(effect.id)}
               />
             </div>
+          ))}
+
+          {/* Empty state */}
+          {animConfig.effects.length === 0 && (
+            <p className="text-[11px] text-neutral-500 text-center py-4">
+              No effects added. Click below to add one.
+            </p>
           )}
-          {trailEffect && (
-            <div className="mt-4">
-              <EffectEditor
-                effect={trailEffect}
-                onChange={(effect) => updateEffect('trail', effect)}
-              />
+
+          {/* Add effect button/dropdown */}
+          {availableEffects.length > 0 && (
+            <div className={animConfig.effects.length > 0 ? 'mt-4' : ''}>
+              <div className="relative">
+                <select
+                  onChange={(e) => {
+                    if (e.target.value) {
+                      addEffect(e.target.value);
+                      e.target.value = '';
+                    }
+                  }}
+                  className="w-full appearance-none bg-neutral-800 border border-dashed border-neutral-700 rounded-lg px-4 py-3 text-xs text-neutral-400 cursor-pointer hover:border-neutral-500 hover:text-neutral-300 transition-colors focus:outline-none focus:border-neutral-500"
+                  defaultValue=""
+                >
+                  <option value="" disabled>
+                    + Add Effect...
+                  </option>
+                  {availableEffects.map(([id, template]) => (
+                    <option key={id} value={id}>
+                      {template.name}
+                    </option>
+                  ))}
+                </select>
+                <Plus className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-500 pointer-events-none" />
+              </div>
             </div>
           )}
         </Section>

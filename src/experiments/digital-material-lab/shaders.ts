@@ -1,27 +1,30 @@
 /**
  * GLSL Shaders for the Digital Material Lab
  *
- * Simplified shader with:
- * - Signed Distance Function (SDF) for rounded rectangle
- * - Analytical anti-aliasing
- * - Clean fill with subtle edge
- * - Digital physics uniforms (for future use)
+ * Includes:
+ * - Main shape shader (SDF rounded rectangle with squircle)
+ * - Trail shader (framebuffer feedback for persistence)
+ * - Composite shader (combines background, trails, and shape)
  */
 
 export const vertexShaderSource = `
   attribute vec2 a_position;
   varying vec2 v_position;
+  varying vec2 v_texCoord;
 
   void main() {
     v_position = a_position;
+    v_texCoord = a_position * 0.5 + 0.5;
     gl_Position = vec4(a_position, 0.0, 1.0);
   }
 `;
 
+// Main fragment shader - renders the shape
 export const fragmentShaderSource = `
   precision highp float;
 
   varying vec2 v_position;
+  varying vec2 v_texCoord;
 
   // Resolution and time
   uniform vec2 u_resolution;
@@ -34,6 +37,21 @@ export const fragmentShaderSource = `
   uniform float u_squircle;      // Superellipse exponent: 2.0 = circle, >2 = squircle
   uniform float u_blur;
 
+  // Trail effect
+  uniform float u_trailEnabled;
+  uniform float u_trailPersistence;
+  uniform float u_trailAmount;
+  uniform sampler2D u_trailTexture;
+  uniform vec3 u_trailColor0;
+  uniform vec3 u_trailColor1;
+  uniform vec3 u_trailColor2;
+  uniform vec3 u_trailColor3;
+  uniform vec4 u_trailColorPositions;  // positions for the 4 color stops
+
+  // Background
+  uniform float u_hasBackground;
+  uniform sampler2D u_backgroundTexture;
+
   // Digital Material (for future use)
   uniform float u_viscosity;
   uniform float u_elasticity;
@@ -42,27 +60,15 @@ export const fragmentShaderSource = `
   uniform float u_gravAttention;
 
   // Lp norm (generalized length function)
-  // p=2: standard Euclidean length (circular) - equivalent to length()
-  // p>2: superellipse/squircle norm (more square-ish but smooth)
-  // p=4: true squircle, p=5: Apple iOS style
   float lpLength(vec2 v, float p) {
-    // Handle edge case where v is zero to avoid pow(0, p) issues
     vec2 av = abs(v);
     if (av.x < 0.0001 && av.y < 0.0001) return 0.0;
     return pow(pow(av.x, p) + pow(av.y, p), 1.0 / p);
   }
 
   // Signed Distance Function for rounded box with squircle corners
-  // Based on Inigo Quilez's sdRoundedBox, but using Lp norm for corners
-  // r = corner radius
-  // n = corner exponent (2.0 = circular, >2 = squircle)
-  //     n=2: standard rounded rect (circular corners)
-  //     n=4: true squircle
-  //     n=5: iOS-style smooth corners
   float sdRoundedBox(vec2 p, vec2 b, float r, float n) {
     vec2 q = abs(p) - b + r;
-    // Standard formula: min(max(q.x,q.y),0.0) + length(max(q,0.0)) - r
-    // Replace length() with lpLength() for squircle corners
     return min(max(q.x, q.y), 0.0) + lpLength(max(q, vec2(0.0)), n) - r;
   }
 
@@ -70,6 +76,26 @@ export const fragmentShaderSource = `
   float getFill(vec2 uv, float edge) {
     float d = sdRoundedBox(uv, u_rectSize, u_cornerRadius, u_squircle);
     return 1.0 - smoothstep(-edge, edge, d);
+  }
+
+  // Sample color from gradient ramp
+  vec3 sampleColorRamp(float t) {
+    t = clamp(t, 0.0, 1.0);
+
+    // Find which segment we're in
+    if (t <= u_trailColorPositions.x) {
+      return u_trailColor0;
+    } else if (t <= u_trailColorPositions.y) {
+      float localT = (t - u_trailColorPositions.x) / (u_trailColorPositions.y - u_trailColorPositions.x);
+      return mix(u_trailColor0, u_trailColor1, localT);
+    } else if (t <= u_trailColorPositions.z) {
+      float localT = (t - u_trailColorPositions.y) / (u_trailColorPositions.z - u_trailColorPositions.y);
+      return mix(u_trailColor1, u_trailColor2, localT);
+    } else if (t <= u_trailColorPositions.w) {
+      float localT = (t - u_trailColorPositions.z) / (u_trailColorPositions.w - u_trailColorPositions.z);
+      return mix(u_trailColor2, u_trailColor3, localT);
+    }
+    return u_trailColor3;
   }
 
   void main() {
@@ -82,18 +108,23 @@ export const fragmentShaderSource = `
     float pixelSize = 2.0 / u_resolution.y;
     float edge = pixelSize * 1.5;
 
+    // Get background color
+    vec3 bgColor = vec3(0.05, 0.05, 0.08);
+    if (u_hasBackground > 0.5) {
+      // Flip Y for proper image orientation
+      vec2 bgUV = vec2(v_texCoord.x, 1.0 - v_texCoord.y);
+      bgColor = texture2D(u_backgroundTexture, bgUV).rgb;
+    }
+
     // Blur sampling
     float fill = 0.0;
 
     if (u_blur < 0.5) {
-      // No blur - single sample for performance
       fill = getFill(uv, edge);
     } else {
-      // Gaussian-weighted blur using multiple samples
       float blurRadius = u_blur * pixelSize;
       float totalWeight = 0.0;
 
-      // 9-tap gaussian blur pattern
       for (int x = -1; x <= 1; x++) {
         for (int y = -1; y <= 1; y++) {
           vec2 offset = vec2(float(x), float(y)) * blurRadius;
@@ -104,7 +135,6 @@ export const fragmentShaderSource = `
       }
       fill /= totalWeight;
 
-      // Add additional blur passes for stronger effect
       if (u_blur > 8.0) {
         float extraBlur = 0.0;
         float extraWeight = 0.0;
@@ -112,7 +142,6 @@ export const fragmentShaderSource = `
 
         for (int x = -2; x <= 2; x++) {
           for (int y = -2; y <= 2; y++) {
-            // Note: abs() only works with float in GLSL ES, so cast to float
             float fx = float(x);
             float fy = float(y);
             if (abs(fx) > 1.0 || abs(fy) > 1.0) {
@@ -128,13 +157,78 @@ export const fragmentShaderSource = `
       }
     }
 
-    // Simple white fill on dark background
-    vec3 bgColor = vec3(0.05, 0.05, 0.08);
+    // Sample trail from previous frame
+    vec3 trailColor = vec3(0.0);
+    if (u_trailEnabled > 0.5 && u_trailAmount > 0.01) {
+      vec4 trailSample = texture2D(u_trailTexture, v_texCoord);
+      float trailIntensity = trailSample.a;
+
+      // Color the trail using the gradient ramp based on age (stored in rgb channels)
+      float trailAge = trailSample.r;  // Age is stored in red channel
+      vec3 rampColor = sampleColorRamp(1.0 - trailAge);  // Newer trails are at end of ramp
+
+      trailColor = rampColor * trailIntensity * u_trailAmount;
+    }
+
+    // Main shape color
     vec3 fillColor = vec3(1.0);
 
-    // Compose
-    vec3 color = mix(bgColor, fillColor, fill);
+    // Compose final color: background + trails + shape
+    vec3 color = bgColor;
+
+    // Add trail glow (additive blending)
+    color = color + trailColor;
+
+    // Draw shape on top
+    color = mix(color, fillColor, fill);
 
     gl_FragColor = vec4(color, 1.0);
+  }
+`;
+
+// Trail accumulation shader - blends current frame with previous for persistence
+export const trailFragmentShaderSource = `
+  precision highp float;
+
+  varying vec2 v_texCoord;
+
+  uniform sampler2D u_currentFrame;    // Current rendered frame
+  uniform sampler2D u_previousTrail;   // Previous trail buffer
+  uniform float u_persistence;         // How much trail persists (0-1)
+  uniform float u_trailAmount;         // Trail intensity
+  uniform float u_deltaTime;           // Time since last frame for aging
+
+  void main() {
+    vec4 current = texture2D(u_currentFrame, v_texCoord);
+    vec4 previous = texture2D(u_previousTrail, v_texCoord);
+
+    // Calculate the brightness of the current frame as mask for new trail
+    float currentBrightness = dot(current.rgb, vec3(0.299, 0.587, 0.114));
+
+    // Age the previous trail (stored in red channel)
+    float previousAge = previous.r + u_deltaTime * 2.0;
+    float previousIntensity = previous.a * u_persistence;
+
+    // New trail contribution (from bright areas in current frame)
+    float newTrailMask = smoothstep(0.3, 0.8, currentBrightness) * u_trailAmount;
+
+    // Combine: keep stronger intensity, blend age
+    float finalIntensity = max(previousIntensity, newTrailMask);
+    float finalAge = newTrailMask > previousIntensity ? 0.0 : previousAge;
+
+    // Output: r = age, g = unused, b = unused, a = intensity
+    gl_FragColor = vec4(finalAge, 0.0, 0.0, finalIntensity);
+  }
+`;
+
+// Simple passthrough shader for copying textures
+export const copyFragmentShaderSource = `
+  precision highp float;
+
+  varying vec2 v_texCoord;
+  uniform sampler2D u_texture;
+
+  void main() {
+    gl_FragColor = texture2D(u_texture, v_texCoord);
   }
 `;

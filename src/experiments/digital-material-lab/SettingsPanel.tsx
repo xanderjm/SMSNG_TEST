@@ -1,6 +1,6 @@
-import { useState, useRef, useEffect } from 'react';
-import { ChevronDown, ChevronRight, Copy, Download, Upload, Circle, Square } from 'lucide-react';
-import type { MaterialUniforms, AnimationConfig, Effect, EffectVariable, ViewportMode } from './index';
+import { useState, useRef, useEffect, useCallback } from 'react';
+import { ChevronDown, ChevronRight, Copy, Download, Upload, Circle, Square, Image, X } from 'lucide-react';
+import type { MaterialUniforms, AnimationConfig, Effect, EffectVariable, ViewportMode, ColorStop } from './index';
 import { CANVAS_WIDTH, CANVAS_HEIGHT } from './index';
 import { MultiPointCurveEditor } from './MultiPointCurveEditor';
 import { BezierCurveEditor } from './BezierCurveEditor';
@@ -16,6 +16,139 @@ interface SettingsPanelProps {
   onViewportModeChange: (mode: ViewportMode) => void;
   isRecording: boolean;
   onToggleRecording: () => void;
+}
+
+// Color ramp editor for trail effect
+interface ColorRampEditorProps {
+  colorRamp: ColorStop[];
+  onChange: (colorRamp: ColorStop[]) => void;
+}
+
+function rgbToHex(r: number, g: number, b: number): string {
+  const toHex = (n: number) => Math.round(n * 255).toString(16).padStart(2, '0');
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+}
+
+function hexToRgb(hex: string): [number, number, number] {
+  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  if (result) {
+    return [
+      parseInt(result[1], 16) / 255,
+      parseInt(result[2], 16) / 255,
+      parseInt(result[3], 16) / 255,
+    ];
+  }
+  return [1, 1, 1];
+}
+
+function ColorRampEditor({ colorRamp, onChange }: ColorRampEditorProps) {
+  const updateColor = (index: number, color: [number, number, number]) => {
+    const newRamp = [...colorRamp];
+    newRamp[index] = { ...newRamp[index], color };
+    onChange(newRamp);
+  };
+
+  // Create gradient string for preview
+  const gradientStops = colorRamp
+    .map(stop => `${rgbToHex(stop.color[0], stop.color[1], stop.color[2])} ${stop.position * 100}%`)
+    .join(', ');
+
+  return (
+    <div className="mt-3">
+      <span className="text-[11px] font-medium text-neutral-400 block mb-2">Color Ramp</span>
+
+      {/* Gradient preview */}
+      <div
+        className="h-6 rounded mb-3 border border-neutral-700"
+        style={{ background: `linear-gradient(to right, ${gradientStops})` }}
+      />
+
+      {/* Color stops */}
+      <div className="grid grid-cols-4 gap-2">
+        {colorRamp.map((stop, index) => (
+          <div key={index} className="flex flex-col items-center gap-1">
+            <input
+              type="color"
+              value={rgbToHex(stop.color[0], stop.color[1], stop.color[2])}
+              onChange={(e) => updateColor(index, hexToRgb(e.target.value))}
+              className="w-8 h-8 rounded cursor-pointer border border-neutral-700 bg-transparent"
+            />
+            <span className="text-[8px] text-neutral-500">{(stop.position * 100).toFixed(0)}%</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Background image picker
+interface BackgroundPickerProps {
+  backgroundImage?: string;
+  onChange: (image: string | undefined) => void;
+}
+
+function BackgroundPicker({ backgroundImage, onChange }: BackgroundPickerProps) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      onChange(event.target?.result as string);
+    };
+    reader.readAsDataURL(file);
+  }, [onChange]);
+
+  const handleClear = useCallback(() => {
+    onChange(undefined);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  }, [onChange]);
+
+  return (
+    <div className="mb-4">
+      <span className="text-[11px] font-medium text-neutral-400 block mb-2">Background Image</span>
+
+      {backgroundImage ? (
+        <div className="relative">
+          <img
+            src={backgroundImage}
+            alt="Background"
+            className="w-full h-20 object-cover rounded border border-neutral-700"
+          />
+          <button
+            onClick={handleClear}
+            className="absolute top-1 right-1 p-1 rounded bg-neutral-900/80 text-neutral-400 hover:text-neutral-200 transition-colors"
+          >
+            <X className="w-3 h-3" />
+          </button>
+        </div>
+      ) : (
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded border border-dashed border-neutral-700 text-neutral-500 hover:border-neutral-500 hover:text-neutral-400 transition-colors"
+        >
+          <Image className="w-4 h-4" />
+          <span className="text-xs">Choose Image</span>
+        </button>
+      )}
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        onChange={handleFileSelect}
+        className="hidden"
+      />
+
+      <p className="text-[9px] text-neutral-600 mt-1.5">
+        Image will be scaled to fit canvas
+      </p>
+    </div>
+  );
 }
 
 interface SliderProps {
@@ -225,9 +358,16 @@ function EffectEditor({ effect, onChange }: EffectEditorProps) {
     onChange({ ...effect, variables: newVariables });
   };
 
+  const updateColorRamp = (colorRamp: ColorStop[]) => {
+    onChange({ ...effect, colorRamp });
+  };
+
   // Get curve start/end Y values for variable display
   const curveStart = effect.curvePoints[0]?.y ?? 0;
   const curveEnd = effect.curvePoints[effect.curvePoints.length - 1]?.y ?? 1;
+
+  // Check if this effect has a color ramp
+  const hasColorRamp = effect.colorRamp !== undefined;
 
   return (
     <div className="bg-neutral-800/50 rounded-lg p-4">
@@ -329,6 +469,16 @@ function EffectEditor({ effect, onChange }: EffectEditorProps) {
               />
             ))}
           </div>
+
+          {/* Color Ramp Section (only for effects with color ramp) */}
+          {hasColorRamp && effect.colorRamp && (
+            <div className="border-t border-neutral-700 pt-4 mt-4">
+              <ColorRampEditor
+                colorRamp={effect.colorRamp}
+                onChange={updateColorRamp}
+              />
+            </div>
+          )}
         </>
       )}
     </div>
@@ -440,6 +590,11 @@ export function SettingsPanel({
 
   const cornerRadiusEffect = animConfig.effects.find(e => e.id === 'cornerRadius');
   const focusEffect = animConfig.effects.find(e => e.id === 'focus');
+  const trailEffect = animConfig.effects.find(e => e.id === 'trail');
+
+  const handleBackgroundChange = (image: string | undefined) => {
+    onAnimConfigChange({ ...animConfig, backgroundImage: image });
+  };
 
   return (
     <div className="w-[340px] bg-neutral-900 border-l border-neutral-800 flex flex-col overflow-hidden">
@@ -549,6 +704,14 @@ export function SettingsPanel({
           </div>
         </Section>
 
+        {/* Background Section */}
+        <Section title="Background">
+          <BackgroundPicker
+            backgroundImage={animConfig.backgroundImage}
+            onChange={handleBackgroundChange}
+          />
+        </Section>
+
         {/* Effects Section */}
         <Section title="Effects">
           {cornerRadiusEffect && (
@@ -562,6 +725,14 @@ export function SettingsPanel({
               <EffectEditor
                 effect={focusEffect}
                 onChange={(effect) => updateEffect('focus', effect)}
+              />
+            </div>
+          )}
+          {trailEffect && (
+            <div className="mt-4">
+              <EffectEditor
+                effect={trailEffect}
+                onChange={(effect) => updateEffect('trail', effect)}
               />
             </div>
           )}

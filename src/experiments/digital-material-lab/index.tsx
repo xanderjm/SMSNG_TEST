@@ -6,7 +6,7 @@ import { createWebGLContext, compileShader, createProgram } from './webgl';
 import { AnimationController } from './animation';
 import type { CurvePoint } from './MultiPointCurveEditor';
 import { evaluateCatmullRom } from './MultiPointCurveEditor';
-import { vertexShaderSource, fragmentShaderSource } from './shaders';
+import { vertexShaderSource, fragmentShaderSource, trailFragmentShaderSource, copyFragmentShaderSource } from './shaders';
 
 // Canvas dimensions (Samsung screen ratio)
 export const CANVAS_WIDTH = 1440;
@@ -14,6 +14,12 @@ export const CANVAS_HEIGHT = 3120;
 
 // Viewport mode type
 export type ViewportMode = 'fit' | '1:1';
+
+// Color stop for gradient ramps
+export interface ColorStop {
+  position: number;        // 0-1 position in the gradient
+  color: [number, number, number];  // RGB values 0-1
+}
 
 // Variable definition - each variable maps the shared curve to its own min/max range
 export interface EffectVariable {
@@ -33,6 +39,7 @@ export interface Effect {
   endT: number;            // When effect finishes transitioning (0-1 of timeline)
   curvePoints: CurvePoint[];  // Single shared curve (all variables use this)
   variables: EffectVariable[];  // Each variable has its own min/max
+  colorRamp?: ColorStop[];  // Optional color ramp for effects that use colors (e.g., trail)
 }
 
 export interface MaterialUniforms {
@@ -53,6 +60,7 @@ export interface AnimationConfig {
   duration: number;
   curve: [number, number, number, number];
   effects: Effect[];
+  backgroundImage?: string;  // Optional background image URL/data URI
 }
 
 // Calculate the current value of a specific variable within an effect
@@ -127,7 +135,7 @@ const defaultAnimConfig: AnimationConfig = {
     {
       id: 'cornerRadius',
       name: 'Corner Shape',
-      enabled: true,
+      enabled: false,         // Off by default
       mode: 'state',          // Follows expansion state (different when expanded vs contracted)
       startT: 0,              // Effect starts at beginning of expansion
       endT: 1,                // Effect ends at full expansion
@@ -153,7 +161,7 @@ const defaultAnimConfig: AnimationConfig = {
     {
       id: 'focus',
       name: 'Focus',
-      enabled: true,
+      enabled: false,         // Off by default
       mode: 'animate',        // Always plays forward on each trigger
       startT: 0,              // Effect starts at beginning
       endT: 1,                // Effect ends at full expansion
@@ -168,6 +176,38 @@ const defaultAnimConfig: AnimationConfig = {
           min: 0,               // No blur (sharp)
           max: 20,              // Maximum blur amount in pixels
         },
+      ],
+    },
+    {
+      id: 'trail',
+      name: 'Trail',
+      enabled: false,         // Off by default
+      mode: 'animate',        // Trails follow animation forward
+      startT: 0,
+      endT: 1,
+      curvePoints: [
+        { x: 0, y: 1 },       // Start: full trail effect
+        { x: 1, y: 0 },       // End: trails fade out
+      ],
+      variables: [
+        {
+          id: 'persistence',
+          name: 'Persistence',
+          min: 0.0,             // No persistence (trails disappear instantly)
+          max: 0.95,            // High persistence (trails linger)
+        },
+        {
+          id: 'amount',
+          name: 'Amount',
+          min: 0,               // No trails
+          max: 1.0,             // Full trail intensity
+        },
+      ],
+      colorRamp: [
+        { position: 0.0, color: [0.0, 0.8, 1.0] },    // Cyan
+        { position: 0.33, color: [0.5, 0.0, 1.0] },   // Purple
+        { position: 0.66, color: [1.0, 0.2, 0.5] },   // Pink
+        { position: 1.0, color: [1.0, 1.0, 1.0] },    // White (newest)
       ],
     },
   ],
@@ -189,6 +229,17 @@ export function DigitalMaterialLab() {
   const [viewportMode, setViewportMode] = useState<ViewportMode>('fit');
   const [viewportScale, setViewportScale] = useState(1);
   const [isRecording, setIsRecording] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+
+  // Trail effect framebuffer refs
+  const trailFramebuffersRef = useRef<WebGLFramebuffer[]>([]);
+  const trailTexturesRef = useRef<WebGLTexture[]>([]);
+  const currentTrailBufferRef = useRef(0);
+  const trailProgramRef = useRef<WebGLProgram | null>(null);
+  const compositeProgramRef = useRef<WebGLProgram | null>(null);
+
+  // Background image texture ref
+  const backgroundTextureRef = useRef<WebGLTexture | null>(null);
 
   // Initialize WebGL with fixed canvas dimensions
   useEffect(() => {
@@ -207,20 +258,76 @@ export function DigitalMaterialLab() {
     glRef.current = gl;
     gl.viewport(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
+    // Main shader program
     const vertShader = compileShader(gl, gl.VERTEX_SHADER, vertexShaderSource);
     const fragShader = compileShader(gl, gl.FRAGMENT_SHADER, fragmentShaderSource);
 
     if (!vertShader || !fragShader) {
-      console.error('Failed to compile shaders');
+      console.error('Failed to compile main shaders');
       return;
     }
 
     const program = createProgram(gl, vertShader, fragShader);
     if (!program) {
-      console.error('Failed to create program');
+      console.error('Failed to create main program');
       return;
     }
     programRef.current = program;
+
+    // Trail shader program
+    const trailFragShader = compileShader(gl, gl.FRAGMENT_SHADER, trailFragmentShaderSource);
+    if (!trailFragShader) {
+      console.error('Failed to compile trail shader');
+      return;
+    }
+    const trailProgram = createProgram(gl, vertShader, trailFragShader);
+    if (!trailProgram) {
+      console.error('Failed to create trail program');
+      return;
+    }
+    trailProgramRef.current = trailProgram;
+
+    // Copy shader program (for texture copying)
+    const copyFragShader = compileShader(gl, gl.FRAGMENT_SHADER, copyFragmentShaderSource);
+    if (!copyFragShader) {
+      console.error('Failed to compile copy shader');
+      return;
+    }
+    const copyProgram = createProgram(gl, vertShader, copyFragShader);
+    if (!copyProgram) {
+      console.error('Failed to create copy program');
+      return;
+    }
+    compositeProgramRef.current = copyProgram;
+
+    // Create framebuffers and textures for trail effect (ping-pong buffer)
+    const createFramebufferTexture = () => {
+      const texture = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, CANVAS_WIDTH, CANVAS_HEIGHT, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+      const framebuffer = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+
+      return { texture, framebuffer };
+    };
+
+    // Create two framebuffers for ping-pong rendering
+    const fb1 = createFramebufferTexture();
+    const fb2 = createFramebufferTexture();
+
+    if (fb1.texture && fb1.framebuffer && fb2.texture && fb2.framebuffer) {
+      trailTexturesRef.current = [fb1.texture, fb2.texture];
+      trailFramebuffersRef.current = [fb1.framebuffer, fb2.framebuffer];
+    }
+
+    // Reset to default framebuffer
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 
     const positions = new Float32Array([
       -1, -1,
@@ -243,8 +350,43 @@ export function DigitalMaterialLab() {
       if (animationRef.current) {
         cancelAnimationFrame(animationRef.current);
       }
+      // Cleanup framebuffers and textures
+      trailFramebuffersRef.current.forEach(fb => fb && gl.deleteFramebuffer(fb));
+      trailTexturesRef.current.forEach(tex => tex && gl.deleteTexture(tex));
     };
   }, []);
+
+  // Load background image texture when it changes
+  useEffect(() => {
+    const gl = glRef.current;
+    if (!gl) return;
+
+    if (animConfig.backgroundImage) {
+      const image = new Image();
+      image.onload = () => {
+        // Delete old texture if exists
+        if (backgroundTextureRef.current) {
+          gl.deleteTexture(backgroundTextureRef.current);
+        }
+
+        const texture = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, texture);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        backgroundTextureRef.current = texture;
+      };
+      image.src = animConfig.backgroundImage;
+    } else {
+      // Clear background texture
+      if (backgroundTextureRef.current) {
+        gl.deleteTexture(backgroundTextureRef.current);
+        backgroundTextureRef.current = null;
+      }
+    }
+  }, [animConfig.backgroundImage]);
 
   // Calculate viewport scale based on mode and available space
   useEffect(() => {
@@ -342,10 +484,13 @@ export function DigitalMaterialLab() {
     if (!gl || !program || !canvas) return;
 
     const startTime = performance.now();
+    let lastTime = startTime;
 
     const render = () => {
       const currentTime = performance.now();
       const elapsed = (currentTime - startTime) / 1000;
+      const deltaTime = (currentTime - lastTime) / 1000;
+      lastTime = currentTime;
 
       // Update animation
       const animController = animControllerRef.current;
@@ -390,6 +535,38 @@ export function DigitalMaterialLab() {
         ? calculateVariableValue(focusEffect, 'amount', expansionProgress, masterProgress)
         : 0;
 
+      // Calculate trail effect
+      const trailEffect = animConfig.effects.find(e => e.id === 'trail');
+      const trailEnabled = trailEffect?.enabled ?? false;
+      const trailPersistence = trailEffect
+        ? calculateVariableValue(trailEffect, 'persistence', expansionProgress, masterProgress)
+        : 0;
+      const trailAmount = trailEffect
+        ? calculateVariableValue(trailEffect, 'amount', expansionProgress, masterProgress)
+        : 0;
+
+      // Get trail color ramp (default to white->cyan if not defined)
+      const colorRamp = trailEffect?.colorRamp ?? [
+        { position: 0.0, color: [0.0, 0.8, 1.0] as [number, number, number] },
+        { position: 0.33, color: [0.5, 0.0, 1.0] as [number, number, number] },
+        { position: 0.66, color: [1.0, 0.2, 0.5] as [number, number, number] },
+        { position: 1.0, color: [1.0, 1.0, 1.0] as [number, number, number] },
+      ];
+
+      // Ensure we have 4 color stops for the shader
+      const colors = [
+        colorRamp[0]?.color ?? [0, 0.8, 1],
+        colorRamp[1]?.color ?? [0.5, 0, 1],
+        colorRamp[2]?.color ?? [1, 0.2, 0.5],
+        colorRamp[3]?.color ?? [1, 1, 1],
+      ];
+      const positions = [
+        colorRamp[0]?.position ?? 0,
+        colorRamp[1]?.position ?? 0.33,
+        colorRamp[2]?.position ?? 0.66,
+        colorRamp[3]?.position ?? 1,
+      ];
+
       gl.useProgram(program);
 
       const setUniform1f = (name: string, value: number) => {
@@ -400,6 +577,21 @@ export function DigitalMaterialLab() {
       const setUniform2f = (name: string, x: number, y: number) => {
         const loc = gl.getUniformLocation(program, name);
         if (loc) gl.uniform2f(loc, x, y);
+      };
+
+      const setUniform3f = (name: string, x: number, y: number, z: number) => {
+        const loc = gl.getUniformLocation(program, name);
+        if (loc) gl.uniform3f(loc, x, y, z);
+      };
+
+      const setUniform4f = (name: string, x: number, y: number, z: number, w: number) => {
+        const loc = gl.getUniformLocation(program, name);
+        if (loc) gl.uniform4f(loc, x, y, z, w);
+      };
+
+      const setUniform1i = (name: string, value: number) => {
+        const loc = gl.getUniformLocation(program, name);
+        if (loc) gl.uniform1i(loc, value);
       };
 
       // Resolution and time
@@ -413,6 +605,36 @@ export function DigitalMaterialLab() {
       setUniform1f('u_squircle', squircleAmount);
       setUniform1f('u_blur', blurAmount);
 
+      // Trail effect uniforms
+      setUniform1f('u_trailEnabled', trailEnabled ? 1.0 : 0.0);
+      setUniform1f('u_trailPersistence', trailPersistence);
+      setUniform1f('u_trailAmount', trailAmount);
+
+      // Trail color ramp
+      setUniform3f('u_trailColor0', colors[0][0], colors[0][1], colors[0][2]);
+      setUniform3f('u_trailColor1', colors[1][0], colors[1][1], colors[1][2]);
+      setUniform3f('u_trailColor2', colors[2][0], colors[2][1], colors[2][2]);
+      setUniform3f('u_trailColor3', colors[3][0], colors[3][1], colors[3][2]);
+      setUniform4f('u_trailColorPositions', positions[0], positions[1], positions[2], positions[3]);
+
+      // Background texture
+      const hasBackground = backgroundTextureRef.current !== null;
+      setUniform1f('u_hasBackground', hasBackground ? 1.0 : 0.0);
+
+      if (hasBackground) {
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, backgroundTextureRef.current);
+        setUniform1i('u_backgroundTexture', 0);
+      }
+
+      // Trail texture (from previous frame)
+      if (trailEnabled && trailTexturesRef.current.length === 2) {
+        const readBuffer = currentTrailBufferRef.current;
+        gl.activeTexture(gl.TEXTURE1);
+        gl.bindTexture(gl.TEXTURE_2D, trailTexturesRef.current[readBuffer]);
+        setUniform1i('u_trailTexture', 1);
+      }
+
       // Digital Material
       setUniform1f('u_viscosity', uniforms.viscosity);
       setUniform1f('u_elasticity', uniforms.elasticity);
@@ -420,10 +642,56 @@ export function DigitalMaterialLab() {
       setUniform1f('u_momentum', uniforms.momentum);
       setUniform1f('u_gravAttention', uniforms.gravAttention);
 
-      // Clear and draw
+      // Clear and draw to screen
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.clearColor(0.05, 0.05, 0.08, 1.0);
       gl.clear(gl.COLOR_BUFFER_BIT);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+      // Update trail buffer (ping-pong)
+      if (trailEnabled && trailTexturesRef.current.length === 2 && trailFramebuffersRef.current.length === 2 && trailProgramRef.current) {
+        const readBuffer = currentTrailBufferRef.current;
+        const writeBuffer = 1 - readBuffer;
+
+        // Render to trail buffer
+        gl.bindFramebuffer(gl.FRAMEBUFFER, trailFramebuffersRef.current[writeBuffer]);
+        gl.useProgram(trailProgramRef.current);
+
+        // Set trail shader uniforms
+        const trailProgram = trailProgramRef.current;
+        const setTrailUniform1f = (name: string, value: number) => {
+          const loc = gl.getUniformLocation(trailProgram, name);
+          if (loc) gl.uniform1f(loc, value);
+        };
+        const setTrailUniform1i = (name: string, value: number) => {
+          const loc = gl.getUniformLocation(trailProgram, name);
+          if (loc) gl.uniform1i(loc, value);
+        };
+
+        // Previous trail texture
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, trailTexturesRef.current[readBuffer]);
+        setTrailUniform1i('u_previousTrail', 0);
+
+        // We don't have a separate current frame texture, so we use the shape's fill
+        // For simplicity, we'll reuse the trail texture and update based on persistence
+        setTrailUniform1f('u_persistence', trailPersistence);
+        setTrailUniform1f('u_trailAmount', trailAmount);
+        setTrailUniform1f('u_deltaTime', deltaTime);
+
+        // Use current frame (we need to read from screen - simplified: just decay previous)
+        gl.activeTexture(gl.TEXTURE1);
+        gl.bindTexture(gl.TEXTURE_2D, trailTexturesRef.current[readBuffer]);
+        setTrailUniform1i('u_currentFrame', 1);
+
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+        // Swap buffers
+        currentTrailBufferRef.current = writeBuffer;
+
+        // Reset to default framebuffer
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      }
 
       animationRef.current = requestAnimationFrame(render);
     };
@@ -462,6 +730,47 @@ export function DigitalMaterialLab() {
     }
   };
 
+  // Drag and drop handlers for JSON presets
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+
+    const files = Array.from(e.dataTransfer.files);
+    const jsonFile = files.find(f => f.name.endsWith('.json'));
+
+    if (jsonFile) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        try {
+          const data = JSON.parse(event.target?.result as string);
+          if (data.uniforms) setUniforms(data.uniforms);
+          if (data.animConfig) setAnimConfig(data.animConfig);
+        } catch (err) {
+          console.error('Failed to parse preset file:', err);
+        }
+      };
+      reader.readAsText(jsonFile);
+    }
+  }, []);
+
+  // Handle background image change
+  const handleBackgroundImageChange = useCallback((imageDataUrl: string | undefined) => {
+    setAnimConfig(prev => ({ ...prev, backgroundImage: imageDataUrl }));
+  }, []);
+
   return (
     <div className="h-screen w-screen bg-neutral-500 overflow-hidden relative flex">
       {/* Main Viewport Area - 50% grey background */}
@@ -470,7 +779,19 @@ export function DigitalMaterialLab() {
         className={`flex-1 relative flex items-center justify-center ${
           viewportMode === '1:1' ? 'overflow-auto' : 'overflow-hidden'
         }`}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
       >
+        {/* Drag overlay indicator */}
+        {isDragging && (
+          <div className="absolute inset-0 z-[100] bg-emerald-500/20 border-4 border-dashed border-emerald-500 flex items-center justify-center pointer-events-none">
+            <div className="bg-neutral-900/90 rounded-xl px-8 py-6 text-center">
+              <p className="text-emerald-400 text-lg font-medium">Drop JSON preset file</p>
+              <p className="text-neutral-400 text-sm mt-1">Release to load settings</p>
+            </div>
+          </div>
+        )}
         {/* Back Navigation */}
         <div className="absolute top-4 left-4 z-50">
           <Link

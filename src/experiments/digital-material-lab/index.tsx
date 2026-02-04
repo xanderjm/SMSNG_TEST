@@ -3,8 +3,20 @@ import { Link } from 'react-router-dom';
 import { ArrowLeft, RotateCcw } from 'lucide-react';
 import { SettingsPanel } from './SettingsPanel';
 import { createWebGLContext, compileShader, createProgram } from './webgl';
-import { AnimationController } from './animation';
+import { AnimationController, cubicBezier } from './animation';
 import { vertexShaderSource, fragmentShaderSource } from './shaders';
+
+// Effect definition - the basis for all animated effects
+export interface Effect {
+  id: string;
+  name: string;
+  enabled: boolean;
+  startValue: number;      // Value at start of effect
+  endValue: number;        // Value at end of effect
+  startT: number;          // Start position on master timeline (0-1)
+  endT: number;            // End position on master timeline (0-1)
+  curve: [number, number, number, number];  // Bezier curve for this effect
+}
 
 export interface MaterialUniforms {
   // Animation
@@ -12,7 +24,7 @@ export interface MaterialUniforms {
   rectSize: [number, number];
   cornerRadius: number;
 
-  // Digital Material (keeping only these)
+  // Digital Material
   viscosity: number;
   elasticity: number;
   surfaceTension: number;
@@ -23,41 +35,67 @@ export interface MaterialUniforms {
 export interface AnimationConfig {
   duration: number;
   curve: [number, number, number, number];
-  motions: Array<{
-    name: string;
-    startT: number;
-    endT: number;
-    curve: [number, number, number, number];
-  }>;
+  effects: Effect[];
+}
+
+// Calculate the current value of an effect based on master timeline progress
+export function calculateEffectValue(effect: Effect, masterProgress: number): number {
+  if (!effect.enabled) {
+    return effect.startValue;
+  }
+
+  const { startT, endT, startValue, endValue, curve } = effect;
+
+  // Before effect starts
+  if (masterProgress <= startT) {
+    return startValue;
+  }
+
+  // After effect ends
+  if (masterProgress >= endT) {
+    return endValue;
+  }
+
+  // During effect - calculate local progress and apply curve
+  const localProgress = (masterProgress - startT) / (endT - startT);
+  const easedProgress = cubicBezier(localProgress, curve);
+
+  return startValue + (endValue - startValue) * easedProgress;
 }
 
 // Capsule dimensions in pixels (based on ~1440 height viewport)
-// Contracted: 1260 x 180 with 60px corners
-// Expanded: 1260 x 1440
-// Convert to normalized UV space (divided by viewport height, then halved for half-size)
-const CONTRACTED_SIZE: [number, number] = [1260 / 2 / 1440, 180 / 2 / 1440]; // [0.4375, 0.0625]
-const EXPANDED_SIZE: [number, number] = [1260 / 2 / 1440, 1440 / 2 / 1440];   // [0.4375, 0.5]
-const CORNER_RADIUS = 60 / 1440; // 0.042
+const CONTRACTED_SIZE: [number, number] = [1260 / 2 / 1440, 180 / 2 / 1440];
+const EXPANDED_SIZE: [number, number] = [1260 / 2 / 1440, 1440 / 2 / 1440];
+const CORNER_RADIUS_START = 60 / 1440;  // 0.042
+const CORNER_RADIUS_END = 60 / 1440;    // Same for now, can be different
 
 const defaultUniforms: MaterialUniforms = {
   animProgress: 0,
   rectSize: CONTRACTED_SIZE,
-  cornerRadius: CORNER_RADIUS,
+  cornerRadius: CORNER_RADIUS_START,
 
   // Digital Physics
   viscosity: 0.5,
   elasticity: 0.6,
   surfaceTension: 0.4,
   momentum: 0.5,
-  gravAttention: 0.0, // Disabled by default for mobile
+  gravAttention: 0.0,
 };
 
 const defaultAnimConfig: AnimationConfig = {
   duration: 800,
   curve: [0.34, 1.56, 0.64, 1],
-  motions: [
-    { name: 'size', startT: 0, endT: 0.6, curve: [0.34, 1.56, 0.64, 1] },
-    { name: 'radius', startT: 0, endT: 0.5, curve: [0.4, 0, 0.2, 1] },
+  effects: [
+    {
+      id: 'cornerRadius',
+      name: 'Corner Roundness',
+      enabled: true,
+      startValue: CORNER_RADIUS_START,
+      endValue: CORNER_RADIUS_END,
+      startT: 0,
+      endT: 1,
+      curve: [0.4, 0, 0.2, 1],
+    },
   ],
 };
 
@@ -84,7 +122,6 @@ export function DigitalMaterialLab() {
     }
     glRef.current = gl;
 
-    // Compile shaders and create program
     const vertShader = compileShader(gl, gl.VERTEX_SHADER, vertexShaderSource);
     const fragShader = compileShader(gl, gl.FRAGMENT_SHADER, fragmentShaderSource);
 
@@ -100,7 +137,6 @@ export function DigitalMaterialLab() {
     }
     programRef.current = program;
 
-    // Create fullscreen quad
     const positions = new Float32Array([
       -1, -1,
        1, -1,
@@ -116,7 +152,6 @@ export function DigitalMaterialLab() {
     gl.enableVertexAttribArray(positionLoc);
     gl.vertexAttribPointer(positionLoc, 2, gl.FLOAT, false, 0, 0);
 
-    // Initialize animation controller
     animControllerRef.current = new AnimationController(animConfig);
 
     return () => {
@@ -160,24 +195,29 @@ export function DigitalMaterialLab() {
 
       // Update animation
       const animController = animControllerRef.current;
-      let animProgress = uniforms.animProgress;
+      let masterProgress = 0;
       if (animController) {
         animController.update(currentTime);
-        animProgress = animController.getProgress();
+        masterProgress = animController.getProgress();
       }
 
-      // Calculate animated values based on expansion state and progress
+      // Calculate animated size based on expansion state and master progress
       const targetSize: [number, number] = isExpanded ? EXPANDED_SIZE : CONTRACTED_SIZE;
       const baseSize: [number, number] = isExpanded ? CONTRACTED_SIZE : EXPANDED_SIZE;
 
       const currentSize: [number, number] = [
-        baseSize[0] + (targetSize[0] - baseSize[0]) * animProgress,
-        baseSize[1] + (targetSize[1] - baseSize[1]) * animProgress,
+        baseSize[0] + (targetSize[0] - baseSize[0]) * masterProgress,
+        baseSize[1] + (targetSize[1] - baseSize[1]) * masterProgress,
       ];
+
+      // Calculate effect values
+      const cornerRadiusEffect = animConfig.effects.find(e => e.id === 'cornerRadius');
+      const currentCornerRadius = cornerRadiusEffect
+        ? calculateEffectValue(cornerRadiusEffect, masterProgress)
+        : uniforms.cornerRadius;
 
       gl.useProgram(program);
 
-      // Set uniforms
       const setUniform1f = (name: string, value: number) => {
         const loc = gl.getUniformLocation(program, name);
         if (loc) gl.uniform1f(loc, value);
@@ -191,11 +231,11 @@ export function DigitalMaterialLab() {
       // Resolution and time
       setUniform2f('u_resolution', canvas.width, canvas.height);
       setUniform1f('u_time', elapsed);
-      setUniform1f('u_animProgress', animProgress);
+      setUniform1f('u_animProgress', masterProgress);
 
-      // Geometry
+      // Geometry - use calculated effect values
       setUniform2f('u_rectSize', currentSize[0], currentSize[1]);
-      setUniform1f('u_cornerRadius', uniforms.cornerRadius);
+      setUniform1f('u_cornerRadius', currentCornerRadius);
 
       // Digital Material
       setUniform1f('u_viscosity', uniforms.viscosity);
@@ -219,7 +259,7 @@ export function DigitalMaterialLab() {
         cancelAnimationFrame(animationRef.current);
       }
     };
-  }, [uniforms, isExpanded]);
+  }, [uniforms, isExpanded, animConfig]);
 
   // Handle canvas click (touch-friendly)
   const handleCanvasClick = useCallback(() => {

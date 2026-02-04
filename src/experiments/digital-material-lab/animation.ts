@@ -1,30 +1,24 @@
 /**
  * Animation system with cubic bezier easing
  *
- * Implements a global timeline architecture where individual motions
- * can be positioned, overlapped, and independently eased.
+ * Implements a global timeline architecture. Effect calculations
+ * are handled separately via the calculateEffectValue function in index.tsx.
  */
 
 export type BezierCurve = [number, number, number, number];
 
-export interface Motion {
-  name: string;
-  startT: number; // Start position on timeline (0-1)
-  endT: number;   // End position on timeline (0-1)
-  curve: BezierCurve;
-}
-
+// Simplified config - just needs duration and master curve
+// Effects are handled separately
 export interface AnimationConfig {
   duration: number;
   curve: BezierCurve;
-  motions: Motion[];
 }
 
 export interface AnimationState {
   isAnimating: boolean;
-  globalTime: number;      // 0-1 position on timeline
+  globalTime: number;      // 0-1 position on timeline (after master curve applied)
+  rawProgress: number;     // 0-1 raw progress (before curve)
   startTimestamp: number;  // When animation started
-  motionProgress: Map<string, number>;
 }
 
 // Preset curves
@@ -42,7 +36,7 @@ export const CURVES = {
 
 /**
  * Evaluate cubic bezier at parameter t
- * Using de Casteljau's algorithm for numerical stability
+ * Using Newton-Raphson iteration for numerical stability
  */
 export function cubicBezier(t: number, curve: BezierCurve): number {
   const [x1, y1, x2, y2] = curve;
@@ -88,83 +82,67 @@ function bezierDX(t: number, x1: number, x2: number): number {
 /**
  * Animation Controller
  *
- * Manages the global timeline and individual motion progress
+ * Manages the global timeline progress. Individual effect values
+ * are calculated externally using calculateEffectValue().
  */
 export class AnimationController {
-  private config: AnimationConfig;
+  private duration: number;
+  private curve: BezierCurve;
   private state: AnimationState;
 
   constructor(config: AnimationConfig) {
-    this.config = config;
+    this.duration = config.duration;
+    this.curve = config.curve;
     this.state = {
       isAnimating: false,
       globalTime: 0,
+      rawProgress: 0,
       startTimestamp: 0,
-      motionProgress: new Map(),
     };
   }
 
   setConfig(config: AnimationConfig) {
-    this.config = config;
+    this.duration = config.duration;
+    this.curve = config.curve;
   }
 
   start(timestamp: number) {
     this.state.isAnimating = true;
     this.state.startTimestamp = timestamp;
     this.state.globalTime = 0;
-    this.state.motionProgress.clear();
+    this.state.rawProgress = 0;
   }
 
   reset() {
     this.state.isAnimating = false;
     this.state.globalTime = 0;
-    this.state.motionProgress.clear();
+    this.state.rawProgress = 0;
   }
 
   update(timestamp: number) {
     if (!this.state.isAnimating) return;
 
     const elapsed = timestamp - this.state.startTimestamp;
-    const rawProgress = Math.min(elapsed / this.config.duration, 1);
+    const rawProgress = Math.min(elapsed / this.duration, 1);
+    this.state.rawProgress = rawProgress;
 
     // Apply master curve
-    this.state.globalTime = cubicBezier(rawProgress, this.config.curve);
-
-    // Update individual motions
-    for (const motion of this.config.motions) {
-      const motionProgress = this.calculateMotionProgress(rawProgress, motion);
-      this.state.motionProgress.set(motion.name, motionProgress);
-    }
+    this.state.globalTime = cubicBezier(rawProgress, this.curve);
 
     // Check if animation completed
     if (rawProgress >= 1) {
       this.state.isAnimating = false;
       this.state.globalTime = 1;
+      this.state.rawProgress = 1;
     }
-  }
-
-  private calculateMotionProgress(globalT: number, motion: Motion): number {
-    const { startT, endT, curve } = motion;
-
-    // Check if we're before the motion starts
-    if (globalT < startT) return 0;
-
-    // Check if we're after the motion ends
-    if (globalT >= endT) return 1;
-
-    // Calculate local progress within motion's time range
-    const localT = (globalT - startT) / (endT - startT);
-
-    // Apply motion's curve
-    return cubicBezier(localT, curve);
   }
 
   getProgress(): number {
     return this.state.globalTime;
   }
 
-  getMotionProgress(name: string): number {
-    return this.state.motionProgress.get(name) ?? 0;
+  getRawProgress(): number {
+    return this.state.rawProgress;
   }
 
   isAnimating(): boolean {

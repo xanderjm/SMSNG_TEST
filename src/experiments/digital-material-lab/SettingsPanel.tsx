@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
-import { ChevronDown, ChevronRight, Copy, Download, Upload } from 'lucide-react';
-import type { MaterialUniforms, AnimationConfig, Effect, EffectVariable } from './index';
+import { ChevronDown, ChevronRight, Copy, Download, Upload, Circle, Square } from 'lucide-react';
+import type { MaterialUniforms, AnimationConfig, Effect, EffectVariable, ViewportMode } from './index';
+import { CANVAS_WIDTH, CANVAS_HEIGHT } from './index';
 import { MultiPointCurveEditor } from './MultiPointCurveEditor';
 import { BezierCurveEditor } from './BezierCurveEditor';
 import { CURVES } from './animation';
@@ -11,6 +12,10 @@ interface SettingsPanelProps {
   onUniformsChange: (uniforms: MaterialUniforms) => void;
   animConfig: AnimationConfig;
   onAnimConfigChange: (config: AnimationConfig) => void;
+  viewportMode: ViewportMode;
+  onViewportModeChange: (mode: ViewportMode) => void;
+  isRecording: boolean;
+  onToggleRecording: () => void;
 }
 
 interface SliderProps {
@@ -366,6 +371,10 @@ export function SettingsPanel({
   onUniformsChange,
   animConfig,
   onAnimConfigChange,
+  viewportMode,
+  onViewportModeChange,
+  isRecording,
+  onToggleRecording,
 }: SettingsPanelProps) {
   const updateUniform = <K extends keyof MaterialUniforms>(
     key: K,
@@ -442,6 +451,70 @@ export function SettingsPanel({
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto">
+        {/* Viewport & Recording Section */}
+        <Section title="Viewport & Recording">
+          {/* Canvas size info */}
+          <div className="mb-4">
+            <span className="text-[11px] font-medium text-neutral-400 block mb-2">Canvas Size</span>
+            <span className="text-[10px] text-neutral-500 font-mono">
+              {CANVAS_WIDTH} × {CANVAS_HEIGHT}px
+            </span>
+          </div>
+
+          {/* Viewport Mode Toggle */}
+          <div className="mb-4">
+            <span className="text-[11px] font-medium text-neutral-400 block mb-2">Viewport Mode</span>
+            <div className="flex gap-2">
+              <button
+                onClick={() => onViewportModeChange('fit')}
+                className={`flex-1 flex items-center justify-center gap-2 px-3 py-2.5 text-[10px] rounded transition-colors ${
+                  viewportMode === 'fit'
+                    ? 'bg-neutral-600 text-neutral-100'
+                    : 'bg-neutral-800 text-neutral-500 hover:bg-neutral-700'
+                }`}
+              >
+                <Square className="w-3 h-3" />
+                Fit
+              </button>
+              <button
+                onClick={() => onViewportModeChange('1:1')}
+                className={`flex-1 flex items-center justify-center gap-2 px-3 py-2.5 text-[10px] rounded transition-colors ${
+                  viewportMode === '1:1'
+                    ? 'bg-neutral-600 text-neutral-100'
+                    : 'bg-neutral-800 text-neutral-500 hover:bg-neutral-700'
+                }`}
+              >
+                <Circle className="w-3 h-3" />
+                1:1
+              </button>
+            </div>
+            <p className="text-[9px] text-neutral-600 mt-1.5">
+              {viewportMode === 'fit'
+                ? 'Scale to fit screen with padding'
+                : 'Actual pixel size (scroll to explore)'}
+            </p>
+          </div>
+
+          {/* Recording Controls */}
+          <div className="mb-4">
+            <span className="text-[11px] font-medium text-neutral-400 block mb-2">Recording</span>
+            <button
+              onClick={onToggleRecording}
+              className={`w-full flex items-center justify-center gap-2 px-4 py-3 rounded font-medium text-xs transition-colors ${
+                isRecording
+                  ? 'bg-red-500/20 text-red-400 border border-red-500/30 hover:bg-red-500/30'
+                  : 'bg-neutral-700 text-neutral-200 hover:bg-neutral-600'
+              }`}
+            >
+              <div className={`w-3 h-3 rounded-full ${isRecording ? 'bg-red-500 animate-pulse' : 'bg-red-500'}`} />
+              {isRecording ? 'Stop Recording' : 'Start Recording'}
+            </button>
+            <p className="text-[9px] text-neutral-600 mt-1.5">
+              Records at {CANVAS_WIDTH}×{CANVAS_HEIGHT}px (WebM format)
+            </p>
+          </div>
+        </Section>
+
         {/* Animation Section */}
         <Section title="Animation">
           <Slider

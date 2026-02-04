@@ -7,7 +7,7 @@ export function createWebGLContext(canvas: HTMLCanvasElement): WebGLRenderingCon
     alpha: false,
     antialias: true,
     depth: false,
-    preserveDrawingBuffer: false,
+    preserveDrawingBuffer: true, // Required for video recording
     powerPreference: 'high-performance',
   };
 

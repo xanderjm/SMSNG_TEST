@@ -8,18 +8,25 @@ import type { CurvePoint } from './MultiPointCurveEditor';
 import { evaluateCatmullRom } from './MultiPointCurveEditor';
 import { vertexShaderSource, fragmentShaderSource } from './shaders';
 
+// Variable definition - each effect can have multiple animated variables
+export interface EffectVariable {
+  id: string;
+  name: string;
+  min: number;             // Minimum possible value (absolute)
+  max: number;             // Maximum possible value (absolute)
+  curvePoints: CurvePoint[];  // Multi-point curve (x=timeline position, y=effect value 0-1)
+}
+
 // Effect definition - the basis for all animated effects
-// Effects use a multi-point curve to define how the value changes during expansion
+// Effects use multi-point curves to define how variables change during expansion
 export interface Effect {
   id: string;
   name: string;
   enabled: boolean;
   mode: 'state' | 'animate';  // 'state' = follows expansion state, 'animate' = always plays forward
-  min: number;             // Minimum possible value (absolute)
-  max: number;             // Maximum possible value (absolute)
   startT: number;          // When effect starts transitioning (0-1 of timeline)
   endT: number;            // When effect finishes transitioning (0-1 of timeline)
-  curvePoints: CurvePoint[];  // Multi-point curve (x=timeline position, y=effect value 0-1)
+  variables: EffectVariable[];  // Each variable has its own min/max and curve
 }
 
 export interface MaterialUniforms {
@@ -42,15 +49,22 @@ export interface AnimationConfig {
   effects: Effect[];
 }
 
-// Calculate the current value of an effect
+// Calculate the current value of a specific variable within an effect
 // - For 'state' mode: use expansionProgress (0=contracted, 1=expanded)
 // - For 'animate' mode: use masterProgress (always 0→1 on each trigger)
-export function calculateEffectValue(
+export function calculateVariableValue(
   effect: Effect,
+  variableId: string,
   expansionProgress: number,
   masterProgress: number
 ): number {
-  const { startT, endT, min, max, curvePoints, enabled, mode } = effect;
+  const { startT, endT, enabled, mode, variables } = effect;
+
+  // Find the variable
+  const variable = variables.find(v => v.id === variableId);
+  if (!variable) return 0;
+
+  const { min, max, curvePoints } = variable;
 
   // Choose which progress to use based on mode
   const progress = mode === 'animate' ? masterProgress : expansionProgress;
@@ -105,16 +119,32 @@ const defaultAnimConfig: AnimationConfig = {
   effects: [
     {
       id: 'cornerRadius',
-      name: 'Corner Roundness',
+      name: 'Corner Shape',
       enabled: true,
       mode: 'state',          // Follows expansion state (different when expanded vs contracted)
-      min: 0.01,              // Minimum corner radius
-      max: 0.15,              // Maximum corner radius
       startT: 0,              // Effect starts at beginning of expansion
       endT: 1,                // Effect ends at full expansion
-      curvePoints: [          // Multi-point curve (add points by double-clicking)
-        { x: 0, y: 0 },       // Start: contracted state (min value)
-        { x: 1, y: 1 },       // End: expanded state (max value)
+      variables: [
+        {
+          id: 'roundness',
+          name: 'Roundness',
+          min: 0.01,            // Minimum corner radius
+          max: 0.15,            // Maximum corner radius
+          curvePoints: [        // Multi-point curve (add points by double-clicking)
+            { x: 0, y: 0 },     // Start: contracted state (min value)
+            { x: 1, y: 1 },     // End: expanded state (max value)
+          ],
+        },
+        {
+          id: 'squircle',
+          name: 'Squircle',
+          min: 2.0,             // 2.0 = standard circle/rounded corners
+          max: 6.0,             // Higher = more iOS-style squircle
+          curvePoints: [
+            { x: 0, y: 0 },     // Start: standard rounded (n=2)
+            { x: 1, y: 0 },     // End: standard rounded (no squircle by default)
+          ],
+        },
       ],
     },
     {
@@ -122,13 +152,19 @@ const defaultAnimConfig: AnimationConfig = {
       name: 'Focus',
       enabled: true,
       mode: 'animate',        // Always plays forward on each trigger
-      min: 0,                 // No blur (sharp)
-      max: 20,                // Maximum blur amount in pixels
       startT: 0,              // Effect starts at beginning
       endT: 1,                // Effect ends at full expansion
-      curvePoints: [
-        { x: 0, y: 1 },       // Start: blurred (out of focus)
-        { x: 1, y: 0 },       // End: sharp (in focus)
+      variables: [
+        {
+          id: 'amount',
+          name: 'Blur Amount',
+          min: 0,               // No blur (sharp)
+          max: 20,              // Maximum blur amount in pixels
+          curvePoints: [
+            { x: 0, y: 1 },     // Start: blurred (out of focus)
+            { x: 1, y: 0 },     // End: sharp (in focus)
+          ],
+        },
       ],
     },
   ],
@@ -251,9 +287,14 @@ export function DigitalMaterialLab() {
       // - State mode effects use expansionProgress (follows state)
       // - Animate mode effects use masterProgress (always plays forward)
       const cornerRadiusEffect = animConfig.effects.find(e => e.id === 'cornerRadius');
+
+      // Corner shape: roundness and squircle
       const rawCornerRadius = cornerRadiusEffect
-        ? calculateEffectValue(cornerRadiusEffect, expansionProgress, masterProgress)
+        ? calculateVariableValue(cornerRadiusEffect, 'roundness', expansionProgress, masterProgress)
         : uniforms.cornerRadius;
+      const squircleAmount = cornerRadiusEffect
+        ? calculateVariableValue(cornerRadiusEffect, 'squircle', expansionProgress, masterProgress)
+        : 2.0;
 
       // Clamp corner radius to half the shortest edge to prevent pinching
       // currentSize stores half-dimensions, so min(w, h) gives us the max valid radius
@@ -263,7 +304,7 @@ export function DigitalMaterialLab() {
       // Calculate focus (blur) effect
       const focusEffect = animConfig.effects.find(e => e.id === 'focus');
       const blurAmount = focusEffect
-        ? calculateEffectValue(focusEffect, expansionProgress, masterProgress)
+        ? calculateVariableValue(focusEffect, 'amount', expansionProgress, masterProgress)
         : 0;
 
       gl.useProgram(program);
@@ -286,6 +327,7 @@ export function DigitalMaterialLab() {
       // Geometry - use calculated effect values
       setUniform2f('u_rectSize', currentSize[0], currentSize[1]);
       setUniform1f('u_cornerRadius', currentCornerRadius);
+      setUniform1f('u_squircle', squircleAmount);
       setUniform1f('u_blur', blurAmount);
 
       // Digital Material

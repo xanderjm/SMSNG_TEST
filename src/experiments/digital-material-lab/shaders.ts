@@ -31,6 +31,7 @@ export const fragmentShaderSource = `
   // Geometry
   uniform vec2 u_rectSize;
   uniform float u_cornerRadius;
+  uniform float u_squircle;      // Superellipse exponent: 2.0 = circle, >2 = squircle
   uniform float u_blur;
 
   // Digital Material (for future use)
@@ -40,15 +41,41 @@ export const fragmentShaderSource = `
   uniform float u_momentum;
   uniform float u_gravAttention;
 
-  // Signed Distance Function for rounded box
+  // Signed Distance Function for rounded box (standard rounded corners)
   float sdRoundedBox(vec2 p, vec2 b, float r) {
     vec2 q = abs(p) - b + r;
     return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - r;
   }
 
+  // Signed Distance Function for superellipse/squircle
+  // n = 2.0 gives standard ellipse, n > 2 gives squircle (iOS-style corners)
+  float sdSuperellipse(vec2 p, vec2 b, float n) {
+    // Normalize position by size
+    vec2 pn = abs(p) / b;
+    // Superellipse formula: |x/a|^n + |y/b|^n = 1
+    float d = pow(pow(pn.x, n) + pow(pn.y, n), 1.0 / n);
+    // Convert to signed distance (inside = negative, outside = positive)
+    return (d - 1.0) * min(b.x, b.y);
+  }
+
   // Calculate fill value for a given UV position
+  // Blends between rounded box and squircle based on u_squircle
   float getFill(vec2 uv, float edge) {
-    float d = sdRoundedBox(uv, u_rectSize, u_cornerRadius);
+    // When squircle is close to 2.0, use rounded box for better corner radius control
+    // As squircle increases, blend toward superellipse for iOS-style corners
+    float squircleBlend = smoothstep(2.0, 3.0, u_squircle);
+
+    // Rounded box SDF (for standard rounded corners)
+    float dBox = sdRoundedBox(uv, u_rectSize, u_cornerRadius);
+
+    // Superellipse SDF (for squircle corners)
+    // Adjust size to account for corner radius visual equivalence
+    vec2 squircleSize = u_rectSize - u_cornerRadius * 0.3 * squircleBlend;
+    float dSquircle = sdSuperellipse(uv, squircleSize, u_squircle);
+
+    // Blend between the two based on squircle amount
+    float d = mix(dBox, dSquircle, squircleBlend);
+
     return 1.0 - smoothstep(-edge, edge, d);
   }
 

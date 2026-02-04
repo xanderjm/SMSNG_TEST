@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { ChevronDown, ChevronRight, Copy, Download, Upload } from 'lucide-react';
-import type { MaterialUniforms, AnimationConfig, Effect } from './index';
+import type { MaterialUniforms, AnimationConfig, Effect, EffectVariable } from './index';
 import { MultiPointCurveEditor } from './MultiPointCurveEditor';
 import { BezierCurveEditor } from './BezierCurveEditor';
 import { CURVES } from './animation';
@@ -156,19 +156,110 @@ function TimelineRange({ startT, endT, onStartChange, onEndChange }: TimelineRan
   );
 }
 
+// Editor for a single variable within an effect
+interface VariableEditorProps {
+  variable: EffectVariable;
+  onChange: (variable: EffectVariable) => void;
+  isExpanded: boolean;
+  onToggleExpand: () => void;
+}
+
+function VariableEditor({ variable, onChange, isExpanded, onToggleExpand }: VariableEditorProps) {
+  // Calculate actual values at start/end of curve
+  const startValue = variable.curvePoints[0]?.y ?? 0;
+  const endValue = variable.curvePoints[variable.curvePoints.length - 1]?.y ?? 1;
+  const startVal = variable.min + (variable.max - variable.min) * startValue;
+  const endVal = variable.min + (variable.max - variable.min) * endValue;
+
+  return (
+    <div className="bg-neutral-800/30 rounded-lg p-3 mt-3">
+      {/* Variable Header */}
+      <button
+        onClick={onToggleExpand}
+        className="w-full flex items-center justify-between text-[11px] font-medium text-neutral-300 hover:text-neutral-200 transition-colors"
+      >
+        <span>{variable.name}</span>
+        {isExpanded ? (
+          <ChevronDown className="w-3.5 h-3.5" />
+        ) : (
+          <ChevronRight className="w-3.5 h-3.5" />
+        )}
+      </button>
+
+      {isExpanded && (
+        <div className="mt-3">
+          {/* Min/Max Range */}
+          <div className="grid grid-cols-2 gap-3 mb-3">
+            <div>
+              <label className="text-[9px] text-neutral-500 uppercase tracking-wider block mb-1">Min</label>
+              <input
+                type="number"
+                step={0.001}
+                value={variable.min}
+                onChange={(e) => onChange({ ...variable, min: parseFloat(e.target.value) || 0 })}
+                className="w-full px-2.5 py-2 bg-neutral-800 border border-neutral-700 rounded text-xs text-neutral-200 font-mono focus:outline-none focus:border-neutral-500"
+              />
+            </div>
+            <div>
+              <label className="text-[9px] text-neutral-500 uppercase tracking-wider block mb-1">Max</label>
+              <input
+                type="number"
+                step={0.001}
+                value={variable.max}
+                onChange={(e) => onChange({ ...variable, max: parseFloat(e.target.value) || 0 })}
+                className="w-full px-2.5 py-2 bg-neutral-800 border border-neutral-700 rounded text-xs text-neutral-200 font-mono focus:outline-none focus:border-neutral-500"
+              />
+            </div>
+          </div>
+
+          {/* Current Values */}
+          <div className="mb-3 flex justify-between text-[9px] font-mono bg-neutral-900/50 rounded px-2.5 py-1.5">
+            <span className="text-emerald-400">
+              Start: {startVal.toFixed(3)}
+            </span>
+            <span className="text-rose-400">
+              End: {endVal.toFixed(3)}
+            </span>
+          </div>
+
+          {/* Curve Editor */}
+          <MultiPointCurveEditor
+            points={variable.curvePoints}
+            onChange={(curvePoints) => onChange({ ...variable, curvePoints })}
+            width={230}
+            height={120}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface EffectEditorProps {
   effect: Effect;
   onChange: (effect: Effect) => void;
 }
 
 function EffectEditor({ effect, onChange }: EffectEditorProps) {
-  const [showCurve, setShowCurve] = useState(true);
+  // Track which variables are expanded (first one expanded by default)
+  const [expandedVars, setExpandedVars] = useState<Record<string, boolean>>(() => {
+    const initial: Record<string, boolean> = {};
+    effect.variables.forEach((v, i) => {
+      initial[v.id] = i === 0; // First variable expanded by default
+    });
+    return initial;
+  });
 
-  // Calculate actual values at contracted/expanded states
-  const startValue = effect.curvePoints[0]?.y ?? 0;
-  const endValue = effect.curvePoints[effect.curvePoints.length - 1]?.y ?? 1;
-  const contractedVal = effect.min + (effect.max - effect.min) * startValue;
-  const expandedVal = effect.min + (effect.max - effect.min) * endValue;
+  const toggleVarExpand = (varId: string) => {
+    setExpandedVars(prev => ({ ...prev, [varId]: !prev[varId] }));
+  };
+
+  const updateVariable = (variableId: string, updatedVariable: EffectVariable) => {
+    const newVariables = effect.variables.map(v =>
+      v.id === variableId ? updatedVariable : v
+    );
+    onChange({ ...effect, variables: newVariables });
+  };
 
   return (
     <div className="bg-neutral-800/50 rounded-lg p-4">
@@ -223,43 +314,6 @@ function EffectEditor({ effect, onChange }: EffectEditorProps) {
             </p>
           </div>
 
-          {/* Value Range */}
-          <div className="mb-4">
-            <span className="text-[11px] font-medium text-neutral-400 block mb-2">Range</span>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-[9px] text-neutral-500 uppercase tracking-wider block mb-1">Min</label>
-                <input
-                  type="number"
-                  step={0.001}
-                  value={effect.min}
-                  onChange={(e) => onChange({ ...effect, min: parseFloat(e.target.value) || 0 })}
-                  className="w-full px-2.5 py-2 bg-neutral-800 border border-neutral-700 rounded text-xs text-neutral-200 font-mono focus:outline-none focus:border-neutral-500"
-                />
-              </div>
-              <div>
-                <label className="text-[9px] text-neutral-500 uppercase tracking-wider block mb-1">Max</label>
-                <input
-                  type="number"
-                  step={0.001}
-                  value={effect.max}
-                  onChange={(e) => onChange({ ...effect, max: parseFloat(e.target.value) || 0 })}
-                  className="w-full px-2.5 py-2 bg-neutral-800 border border-neutral-700 rounded text-xs text-neutral-200 font-mono focus:outline-none focus:border-neutral-500"
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Current State Values */}
-          <div className="mb-4 flex justify-between text-[10px] font-mono bg-neutral-800 rounded px-3 py-2">
-            <span className="text-emerald-400">
-              Contracted: {contractedVal.toFixed(4)}
-            </span>
-            <span className="text-rose-400">
-              Expanded: {expandedVal.toFixed(4)}
-            </span>
-          </div>
-
           {/* Timeline Position */}
           <TimelineRange
             startT={effect.startT}
@@ -268,30 +322,18 @@ function EffectEditor({ effect, onChange }: EffectEditorProps) {
             onEndChange={(v) => onChange({ ...effect, endT: v })}
           />
 
-          {/* Curve Editor */}
+          {/* Variables Section */}
           <div className="border-t border-neutral-700 pt-4 mt-4">
-            <button
-              onClick={() => setShowCurve(!showCurve)}
-              className="w-full flex items-center justify-between py-1 text-[11px] font-medium text-neutral-400 hover:text-neutral-300 transition-colors"
-            >
-              <span>Curve</span>
-              {showCurve ? (
-                <ChevronDown className="w-3.5 h-3.5" />
-              ) : (
-                <ChevronRight className="w-3.5 h-3.5" />
-              )}
-            </button>
-
-            {showCurve && (
-              <div className="mt-3">
-                <MultiPointCurveEditor
-                  points={effect.curvePoints}
-                  onChange={(curvePoints) => onChange({ ...effect, curvePoints })}
-                  width={260}
-                  height={160}
-                />
-              </div>
-            )}
+            <span className="text-[11px] font-medium text-neutral-400 block mb-1">Variables</span>
+            {effect.variables.map((variable) => (
+              <VariableEditor
+                key={variable.id}
+                variable={variable}
+                onChange={(updated) => updateVariable(variable.id, updated)}
+                isExpanded={expandedVars[variable.id] ?? false}
+                onToggleExpand={() => toggleVarExpand(variable.id)}
+              />
+            ))}
           </div>
         </>
       )}

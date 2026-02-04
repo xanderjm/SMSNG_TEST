@@ -19,19 +19,27 @@ const expansionProgress = isExpanded ? masterProgress : (1 - masterProgress);
 
 ### Effect Interface
 
-Every effect follows this interface:
+Effects support multiple animated variables. Each effect has shared controls (mode, timeline), while each variable has its own min/max range and curve:
 
 ```typescript
+// Variable definition - each effect can have multiple animated variables
+interface EffectVariable {
+  id: string;                    // Unique identifier within effect
+  name: string;                  // Display name in UI
+  min: number;                   // Minimum possible value (absolute)
+  max: number;                   // Maximum possible value (absolute)
+  curvePoints: CurvePoint[];     // Multi-point bezier curve for this variable
+}
+
+// Effect definition - container for one or more animated variables
 interface Effect {
   id: string;                    // Unique identifier
   name: string;                  // Display name in UI
   enabled: boolean;              // Toggle on/off
   mode: 'state' | 'animate';     // Animation mode (see below)
-  min: number;                   // Minimum possible value (absolute)
-  max: number;                   // Maximum possible value (absolute)
   startT: number;                // When effect starts (0-1 of timeline)
   endT: number;                  // When effect ends (0-1 of timeline)
-  curvePoints: CurvePoint[];     // Multi-point bezier curve defining the effect shape
+  variables: EffectVariable[];   // Each variable has its own min/max and curve
 }
 
 interface CurvePoint {
@@ -93,26 +101,49 @@ Effects have two modes that control how the animation curve is played:
 
 3. **Final Value**: `min + (max - min) * curveOutput`
 
-### Example: Corner Roundness Effect (State Mode)
+### Example: Corner Shape Effect (State Mode, Multiple Variables)
+
+The corner shape effect has two variables: roundness and squircle. They share the same timeline and mode but each has its own min/max and curve:
 
 ```typescript
 {
   id: 'cornerRadius',
-  name: 'Corner Roundness',
+  name: 'Corner Shape',
   enabled: true,
   mode: 'state',       // Different values when expanded vs contracted
-  min: 0.01,           // Minimum corner radius
-  max: 0.15,           // Maximum corner radius
   startT: 0,           // Start transitioning immediately
   endT: 1,             // Finish at full expansion
-  curvePoints: [
-    { x: 0, y: 0 },    // Contracted: min value
-    { x: 1, y: 1 },    // Expanded: max value
+  variables: [
+    {
+      id: 'roundness',
+      name: 'Roundness',
+      min: 0.01,           // Minimum corner radius
+      max: 0.15,           // Maximum corner radius
+      curvePoints: [
+        { x: 0, y: 0 },    // Contracted: min value (sharp corners)
+        { x: 1, y: 1 },    // Expanded: max value (rounded corners)
+      ],
+    },
+    {
+      id: 'squircle',
+      name: 'Squircle',
+      min: 2.0,            // 2.0 = standard circle/rounded corners
+      max: 6.0,            // Higher = more iOS-style squircle
+      curvePoints: [
+        { x: 0, y: 0 },    // Contracted: standard rounded (n=2)
+        { x: 1, y: 0.5 },  // Expanded: moderate squircle (n=4)
+      ],
+    },
   ],
 }
 ```
 
-### Example: Focus Effect (Animate Mode)
+**Squircle Explained**: The squircle parameter controls the superellipse exponent (n):
+- `n = 2.0`: Standard circle/ellipse corners
+- `n = 4.0-5.0`: iOS-style squircle (smooth, squared corners)
+- `n = 6.0+`: Very square but still smooth
+
+### Example: Focus Effect (Animate Mode, Single Variable)
 
 ```typescript
 {
@@ -120,13 +151,19 @@ Effects have two modes that control how the animation curve is played:
   name: 'Focus',
   enabled: true,
   mode: 'animate',     // Always plays forward on each trigger
-  min: 0,              // Sharp (no blur)
-  max: 20,             // Maximum blur
   startT: 0,
   endT: 1,
-  curvePoints: [
-    { x: 0, y: 1 },    // Start blurred
-    { x: 1, y: 0 },    // End sharp
+  variables: [
+    {
+      id: 'amount',
+      name: 'Blur Amount',
+      min: 0,              // Sharp (no blur)
+      max: 20,             // Maximum blur
+      curvePoints: [
+        { x: 0, y: 1 },    // Start blurred
+        { x: 1, y: 0 },    // End sharp
+      ],
+    },
   ],
 }
 ```
@@ -139,14 +176,20 @@ Effects have two modes that control how the animation curve is played:
   name: 'Bounce Effect',
   enabled: true,
   mode: 'animate',     // One-shot animation
-  min: 0,
-  max: 1,
   startT: 0,
   endT: 1,
-  curvePoints: [
-    { x: 0, y: 0 },     // Start at 0
-    { x: 0.5, y: 0.8 }, // Peak at 80% in the middle
-    { x: 1, y: 0 },     // Return to 0
+  variables: [
+    {
+      id: 'intensity',
+      name: 'Intensity',
+      min: 0,
+      max: 1,
+      curvePoints: [
+        { x: 0, y: 0 },     // Start at 0
+        { x: 0.5, y: 0.8 }, // Peak at 80% in the middle
+        { x: 1, y: 0 },     // Return to 0
+      ],
+    },
   ],
 }
 ```
@@ -165,35 +208,44 @@ const defaultAnimConfig: AnimationConfig = {
       name: 'My New Effect',
       enabled: true,
       mode: 'state',        // or 'animate' for one-shot effects
-      min: 0,
-      max: 1,
       startT: 0,
       endT: 1,
-      curvePoints: [
-        { x: 0, y: 0 },
-        { x: 1, y: 1 },
+      variables: [
+        {
+          id: 'primary',
+          name: 'Primary Value',
+          min: 0,
+          max: 1,
+          curvePoints: [
+            { x: 0, y: 0 },
+            { x: 1, y: 1 },
+          ],
+        },
+        // Add more variables as needed
       ],
     },
   ],
 };
 ```
 
-### Step 2: Calculate the Effect Value in Render Loop
+### Step 2: Calculate Variable Values in Render Loop
 
 ```typescript
 const myEffect = animConfig.effects.find(e => e.id === 'myNewEffect');
-const myEffectValue = myEffect
-  ? calculateEffectValue(myEffect, expansionProgress, masterProgress)
+
+// Calculate each variable value
+const primaryValue = myEffect
+  ? calculateVariableValue(myEffect, 'primary', expansionProgress, masterProgress)
   : defaultValue;
 
 // Apply clamping if needed
-const clampedValue = Math.min(myEffectValue, maxAllowedValue);
+const clampedValue = Math.min(primaryValue, maxAllowedValue);
 
 // Use in shader or geometry
 setUniform1f('u_myEffect', clampedValue);
 ```
 
-**Note**: `calculateEffectValue` takes both `expansionProgress` and `masterProgress`:
+**Note**: `calculateVariableValue` takes the effect, variable ID, and both progress values:
 - State mode effects use `expansionProgress` (0=contracted, 1=expanded)
 - Animate mode effects use `masterProgress` (always 0→1 on trigger)
 
@@ -213,20 +265,24 @@ const myEffect = animConfig.effects.find(e => e.id === 'myNewEffect');
 
 ## UI Controls
 
-### Effect Range (Min/Max)
-- Defines the absolute bounds of the effect
-- Curve Y values (0-1) map to this range
+### Effect Header
+- Toggle switch to enable/disable the entire effect
+- Mode selector: State (follows expansion) vs Animate (always forward)
 
-### State Values Display
-- **Contracted**: Actual value when `expansionProgress = 0`
-- **Expanded**: Actual value when `expansionProgress = 1`
-
-### Timeline Position
+### Timeline Position (Shared by all variables)
 - **Start (green line)**: When effect begins transitioning - drag directly
 - **End (red line)**: When effect finishes transitioning - drag directly
 - Lines are directly draggable (no separate slider controls)
 
-### Multi-Point Bezier Curve Editor
+### Variables Section
+Each effect can have multiple animated variables. Each variable has:
+
+- **Collapsible header**: Click to expand/collapse variable settings
+- **Min/Max Range**: Define the absolute bounds for this variable
+- **Start/End Values**: Shows calculated values at curve start and end
+- **Curve Editor**: Each variable has its own curve editor
+
+### Multi-Point Bezier Curve Editor (Per Variable)
 - **Green point**: Start value (fixed at x=0, Y-axis only)
 - **Red point**: End value (fixed at x=1, Y-axis only)
 - **White points**: Intermediate keyframes (fully draggable)
@@ -404,16 +460,22 @@ export interface CurvePoint {
   handleOut?: { x: number; y: number };  // Bezier handle (outgoing)
 }
 
+export interface EffectVariable {
+  id: string;
+  name: string;
+  min: number;
+  max: number;
+  curvePoints: CurvePoint[];
+}
+
 export interface Effect {
   id: string;
   name: string;
   enabled: boolean;
   mode: 'state' | 'animate';  // 'state' follows expansion, 'animate' always forward
-  min: number;
-  max: number;
   startT: number;
   endT: number;
-  curvePoints: CurvePoint[];
+  variables: EffectVariable[];
 }
 
 export interface AnimationConfig {
@@ -427,7 +489,12 @@ export interface AnimationConfig {
 
 ```typescript
 // @/lib/effects/calculate.ts
-export function calculateEffectValue(effect: Effect, progress: number): number;
+export function calculateVariableValue(
+  effect: Effect,
+  variableId: string,
+  expansionProgress: number,
+  masterProgress: number
+): number;
 
 // @/lib/effects/interpolation.ts
 export function evaluateBezierCurve(points: CurvePoint[], x: number): number;
@@ -452,27 +519,19 @@ export function cubicBezier(t: number, curve: BezierCurve): number;
 Each animated component follows this pattern:
 
 ```typescript
-// 1. Define component-specific effects
+// 1. Define component-specific effects with variables
 const defaultEffects: Effect[] = [
   {
-    id: 'scale',
-    name: 'Scale',
+    id: 'transform',
+    name: 'Transform',
     enabled: true,
-    min: 1,
-    max: 1.2,
+    mode: 'state',
     startT: 0,
     endT: 1,
-    curvePoints: [{ x: 0, y: 0 }, { x: 1, y: 1 }],
-  },
-  {
-    id: 'opacity',
-    name: 'Opacity',
-    enabled: true,
-    min: 0.8,
-    max: 1,
-    startT: 0,
-    endT: 0.5,
-    curvePoints: [{ x: 0, y: 0 }, { x: 1, y: 1 }],
+    variables: [
+      { id: 'scale', name: 'Scale', min: 1, max: 1.2, curvePoints: [{ x: 0, y: 0 }, { x: 1, y: 1 }] },
+      { id: 'opacity', name: 'Opacity', min: 0.8, max: 1, curvePoints: [{ x: 0, y: 0 }, { x: 1, y: 1 }] },
+    ],
   },
 ];
 
@@ -483,9 +542,10 @@ const animController = new AnimationController(config);
 const progress = animController.getProgress();
 const expansionProgress = isActive ? progress : (1 - progress);
 
-// 4. Calculate each effect value
-const scale = calculateEffectValue(scaleEffect, expansionProgress);
-const opacity = calculateEffectValue(opacityEffect, expansionProgress);
+// 4. Calculate each variable value
+const transformEffect = effects.find(e => e.id === 'transform');
+const scale = calculateVariableValue(transformEffect, 'scale', expansionProgress, progress);
+const opacity = calculateVariableValue(transformEffect, 'opacity', expansionProgress, progress);
 
 // 5. Apply to renderer (CSS, WebGL, SVG, etc.)
 element.style.transform = `scale(${scale})`;
@@ -498,12 +558,22 @@ element.style.opacity = opacity;
 // components/AnimatedButton.tsx
 import { useEffect, useState, useRef } from 'react';
 import { AnimationController } from '@/lib/effects/animation';
-import { calculateEffectValue, Effect } from '@/lib/effects/types';
+import { calculateVariableValue, Effect } from '@/lib/effects/types';
 
 const buttonEffects: Effect[] = [
-  { id: 'scale', name: 'Scale', enabled: true, min: 1, max: 1.05, startT: 0, endT: 1, curvePoints: [...] },
-  { id: 'shadow', name: 'Shadow', enabled: true, min: 0, max: 20, startT: 0, endT: 0.8, curvePoints: [...] },
-  { id: 'brightness', name: 'Brightness', enabled: true, min: 1, max: 1.1, startT: 0, endT: 0.5, curvePoints: [...] },
+  {
+    id: 'hover',
+    name: 'Hover Effect',
+    enabled: true,
+    mode: 'state',
+    startT: 0,
+    endT: 1,
+    variables: [
+      { id: 'scale', name: 'Scale', min: 1, max: 1.05, curvePoints: [...] },
+      { id: 'shadow', name: 'Shadow', min: 0, max: 20, curvePoints: [...] },
+      { id: 'brightness', name: 'Brightness', min: 1, max: 1.1, curvePoints: [...] },
+    ],
+  },
 ];
 
 export function AnimatedButton({ children, effects = buttonEffects }) {
@@ -511,7 +581,7 @@ export function AnimatedButton({ children, effects = buttonEffects }) {
   const animRef = useRef(new AnimationController({ duration: 200, curve: [0.4, 0, 0.2, 1], effects }));
 
   // Update and apply effects in animation frame
-  // ...
+  // const scale = calculateVariableValue(hoverEffect, 'scale', expansionProgress, masterProgress);
 }
 ```
 
@@ -520,9 +590,19 @@ export function AnimatedButton({ children, effects = buttonEffects }) {
 ```typescript
 // components/AnimatedToggle.tsx
 const toggleEffects: Effect[] = [
-  { id: 'knobX', name: 'Knob Position', min: 0, max: 24, ... },
-  { id: 'trackColor', name: 'Track Hue', min: 0, max: 120, ... },
-  { id: 'knobScale', name: 'Knob Scale', min: 1, max: 1.1, ... },
+  {
+    id: 'toggle',
+    name: 'Toggle Animation',
+    enabled: true,
+    mode: 'state',
+    startT: 0,
+    endT: 1,
+    variables: [
+      { id: 'knobX', name: 'Knob Position', min: 0, max: 24, curvePoints: [...] },
+      { id: 'trackColor', name: 'Track Hue', min: 0, max: 120, curvePoints: [...] },
+      { id: 'knobScale', name: 'Knob Scale', min: 1, max: 1.1, curvePoints: [...] },
+    ],
+  },
 ];
 ```
 
@@ -531,9 +611,19 @@ const toggleEffects: Effect[] = [
 ```typescript
 // components/TransformingImage.tsx
 const imageEffects: Effect[] = [
-  { id: 'clipPath', name: 'Clip Progress', min: 0, max: 1, ... },
-  { id: 'blur', name: 'Blur Amount', min: 0, max: 10, ... },
-  { id: 'rotation', name: 'Rotation', min: 0, max: 15, ... },
+  {
+    id: 'reveal',
+    name: 'Reveal Effect',
+    enabled: true,
+    mode: 'animate',
+    startT: 0,
+    endT: 1,
+    variables: [
+      { id: 'clipPath', name: 'Clip Progress', min: 0, max: 1, curvePoints: [...] },
+      { id: 'blur', name: 'Blur Amount', min: 10, max: 0, curvePoints: [...] },
+      { id: 'rotation', name: 'Rotation', min: 5, max: 0, curvePoints: [...] },
+    ],
+  },
 ];
 ```
 

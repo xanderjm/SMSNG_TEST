@@ -39,10 +39,10 @@ This contains:
 
 When creating new effects, follow this process (documented in ARCHITECTURE.md):
 
-1. **Define the effect** in `defaultAnimConfig.effects[]`
-2. **Calculate the value** in the render loop using `calculateEffectValue()`
+1. **Define the effect** in `defaultAnimConfig.effects[]` with variables array
+2. **Calculate variable values** in the render loop using `calculateVariableValue(effect, variableId, expansionProgress, masterProgress)`
 3. **Pass to shader** via uniform (if GPU-based)
-4. **Add UI controls** in `SettingsPanel.tsx`
+4. **Add UI controls** in `SettingsPanel.tsx` (EffectEditor handles multiple variables automatically)
 
 ### 4. GLSL ES 2.0 Critical Rules
 
@@ -61,19 +61,25 @@ See ARCHITECTURE.md "GLSL ES Shader Guidelines" for full list.
 
 ### 5. Effect Interface
 
-Current Effect interface (keep docs updated if this changes):
+Effects support multiple variables. Each effect has shared controls (mode, timeline), while each variable has its own min/max and curve:
 
 ```typescript
+interface EffectVariable {
+  id: string;
+  name: string;
+  min: number;
+  max: number;
+  curvePoints: CurvePoint[];
+}
+
 interface Effect {
   id: string;
   name: string;
   enabled: boolean;
   mode: 'state' | 'animate';  // state=follows expansion, animate=always forward
-  min: number;
-  max: number;
   startT: number;
   endT: number;
-  curvePoints: CurvePoint[];
+  variables: EffectVariable[];  // Each variable has its own min/max and curve
 }
 
 interface CurvePoint {
@@ -81,6 +87,19 @@ interface CurvePoint {
   y: number;
   handleIn?: { x: number; y: number };
   handleOut?: { x: number; y: number };
+}
+```
+
+Example: Corner Shape effect with two variables (roundness + squircle):
+```typescript
+{
+  id: 'cornerRadius',
+  name: 'Corner Shape',
+  mode: 'state',
+  variables: [
+    { id: 'roundness', name: 'Roundness', min: 0.01, max: 0.15, curvePoints: [...] },
+    { id: 'squircle', name: 'Squircle', min: 2.0, max: 6.0, curvePoints: [...] },
+  ],
 }
 ```
 

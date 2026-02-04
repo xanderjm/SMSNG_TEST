@@ -639,11 +639,6 @@ export function DigitalMaterialLab() {
       const velocityY = currentSize[1] - prevSize[1];
       const velocity = Math.sqrt(velocityX * velocityX + velocityY * velocityY);
 
-      // Normalize velocity direction (for directional smear)
-      const velocityMag = Math.max(velocity, 0.0001);
-      const velocityDirX = velocityX / velocityMag;
-      const velocityDirY = velocityY / velocityMag;
-
       // Update previous size for next frame
       prevSizeRef.current = [...currentSize];
 
@@ -673,7 +668,6 @@ export function DigitalMaterialLab() {
         setUniform(trailProg, 'u_trailAmount', trailAmount);
         setUniform(trailProg, 'u_trailColor', trailColor);
         setUniform(trailProg, 'u_velocity', velocity);
-        setUniform(trailProg, 'u_velocityDir', [velocityDirX, velocityDirY]);
 
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 

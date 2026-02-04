@@ -118,24 +118,24 @@ export const trailAccumulateShaderSource = `
   uniform float u_persistence;         // Fade multiplier per frame (0.8-0.98)
   uniform float u_trailAmount;         // Trail intensity/opacity
   uniform vec3 u_trailColor;           // Current trail color
-  uniform float u_velocity;            // Movement velocity (0 = stationary)
-  uniform vec2 u_velocityDir;          // Normalized velocity direction for smear
+  uniform float u_velocity;            // Movement velocity magnitude (0 = stationary)
 
   void main() {
-    // Optional: UV offset for directional smear effect
-    // Smear in opposite direction of movement for trailing effect
-    vec2 smearOffset = -u_velocityDir * 0.003 * u_persistence;
-    vec4 previousTrail = texture2D(u_previousTrail, v_texCoord + smearOffset);
+    // Sample previous trail (no smear - expansion doesn't have a direction)
+    vec4 previousTrail = texture2D(u_previousTrail, v_texCoord);
     vec4 currentShape = texture2D(u_currentShape, v_texCoord);
 
     // Simple multiplicative fade - will actually reach zero
     // Apply a threshold to kill very dim values and prevent ghosting
     vec3 fadedTrail = previousTrail.rgb * u_persistence;
-    fadedTrail = fadedTrail * step(0.01, fadedTrail);  // Kill values below threshold
+
+    // Kill values below threshold to prevent permanent ghosting
+    float maxChannel = max(max(fadedTrail.r, fadedTrail.g), fadedTrail.b);
+    fadedTrail = fadedTrail * step(0.01, maxChannel);
 
     // Only add new trail when there's movement
     // smoothstep creates a gradual ramp: no trail when still, full trail when moving fast
-    float movementMask = smoothstep(0.0, 0.05, u_velocity);
+    float movementMask = smoothstep(0.0, 0.02, u_velocity);
 
     // New trail contribution - only when moving
     vec3 newTrailColor = u_trailColor * currentShape.a * u_trailAmount * movementMask;
@@ -144,7 +144,7 @@ export const trailAccumulateShaderSource = `
     vec3 result = fadedTrail + newTrailColor;
 
     // Hard clamp to prevent blowout but allow zeros
-    result = min(result, vec3(2.0));
+    result = min(result, vec3(1.5));
 
     gl_FragColor = vec4(result, 1.0);
   }

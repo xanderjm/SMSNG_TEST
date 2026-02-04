@@ -3,19 +3,29 @@ import { Link } from 'react-router-dom';
 import { ArrowLeft, RotateCcw } from 'lucide-react';
 import { SettingsPanel } from './SettingsPanel';
 import { createWebGLContext, compileShader, createProgram } from './webgl';
-import { AnimationController, cubicBezier } from './animation';
+import { AnimationController } from './animation';
+import type { CurvePoint } from './MultiPointCurveEditor';
+import { evaluateCatmullRom } from './MultiPointCurveEditor';
 import { vertexShaderSource, fragmentShaderSource } from './shaders';
 
-// Effect definition - the basis for all animated effects
+// Variable definition - each variable maps the shared curve to its own min/max range
+export interface EffectVariable {
+  id: string;
+  name: string;
+  min: number;             // Value when curve = 0
+  max: number;             // Value when curve = 1
+}
+
+// Effect definition - single curve shared by all variables
 export interface Effect {
   id: string;
   name: string;
   enabled: boolean;
-  startValue: number;      // Value at start of effect
-  endValue: number;        // Value at end of effect
-  startT: number;          // Start position on master timeline (0-1)
-  endT: number;            // End position on master timeline (0-1)
-  curve: [number, number, number, number];  // Bezier curve for this effect
+  mode: 'state' | 'animate';  // 'state' = follows expansion state, 'animate' = always plays forward
+  startT: number;          // When effect starts transitioning (0-1 of timeline)
+  endT: number;            // When effect finishes transitioning (0-1 of timeline)
+  curvePoints: CurvePoint[];  // Single shared curve (all variables use this)
+  variables: EffectVariable[];  // Each variable has its own min/max
 }
 
 export interface MaterialUniforms {
@@ -38,41 +48,62 @@ export interface AnimationConfig {
   effects: Effect[];
 }
 
-// Calculate the current value of an effect based on master timeline progress
-export function calculateEffectValue(effect: Effect, masterProgress: number): number {
-  if (!effect.enabled) {
-    return effect.startValue;
+// Calculate the current value of a specific variable within an effect
+// All variables share the same curve - the curve output (0-1) maps to each variable's min/max
+// - For 'state' mode: use expansionProgress (0=contracted, 1=expanded)
+// - For 'animate' mode: use masterProgress (always 0→1 on each trigger)
+export function calculateVariableValue(
+  effect: Effect,
+  variableId: string,
+  expansionProgress: number,
+  masterProgress: number
+): number {
+  const { startT, endT, enabled, mode, curvePoints, variables } = effect;
+
+  // Find the variable
+  const variable = variables.find(v => v.id === variableId);
+  if (!variable) return 0;
+
+  const { min, max } = variable;
+
+  // Choose which progress to use based on mode
+  const progress = mode === 'animate' ? masterProgress : expansionProgress;
+
+  // Get start and end values from the SHARED curve points
+  const startValue = curvePoints[0]?.y ?? 0;
+  const endValue = curvePoints[curvePoints.length - 1]?.y ?? 1;
+
+  // If disabled, return the value at curve start position
+  if (!enabled) {
+    return min + (max - min) * startValue;
   }
 
-  const { startT, endT, startValue, endValue, curve } = effect;
-
-  // Before effect starts
-  if (masterProgress <= startT) {
-    return startValue;
+  // Before effect's timeline window - stay at start value
+  if (progress <= startT) {
+    return min + (max - min) * startValue;
   }
 
-  // After effect ends
-  if (masterProgress >= endT) {
-    return endValue;
+  // After effect's timeline window - stay at end value
+  if (progress >= endT) {
+    return min + (max - min) * endValue;
   }
 
-  // During effect - calculate local progress and apply curve
-  const localProgress = (masterProgress - startT) / (endT - startT);
-  const easedProgress = cubicBezier(localProgress, curve);
+  // During effect's timeline window - interpolate using shared multi-point curve
+  const localProgress = (progress - startT) / (endT - startT);
+  const curveOutput = evaluateCatmullRom(curvePoints, localProgress);
 
-  return startValue + (endValue - startValue) * easedProgress;
+  // curveOutput is 0-1, map to this variable's min-max range
+  return min + (max - min) * curveOutput;
 }
 
 // Capsule dimensions in pixels (based on ~1440 height viewport)
 const CONTRACTED_SIZE: [number, number] = [1260 / 2 / 1440, 180 / 2 / 1440];
 const EXPANDED_SIZE: [number, number] = [1260 / 2 / 1440, 1440 / 2 / 1440];
-const CORNER_RADIUS_START = 60 / 1440;  // 0.042
-const CORNER_RADIUS_END = 60 / 1440;    // Same for now, can be different
 
 const defaultUniforms: MaterialUniforms = {
   animProgress: 0,
   rectSize: CONTRACTED_SIZE,
-  cornerRadius: CORNER_RADIUS_START,
+  cornerRadius: 60 / 1440,
 
   // Digital Physics
   viscosity: 0.5,
@@ -88,13 +119,49 @@ const defaultAnimConfig: AnimationConfig = {
   effects: [
     {
       id: 'cornerRadius',
-      name: 'Corner Roundness',
+      name: 'Corner Shape',
       enabled: true,
-      startValue: CORNER_RADIUS_START,
-      endValue: CORNER_RADIUS_END,
-      startT: 0,
-      endT: 1,
-      curve: [0.4, 0, 0.2, 1],
+      mode: 'state',          // Follows expansion state (different when expanded vs contracted)
+      startT: 0,              // Effect starts at beginning of expansion
+      endT: 1,                // Effect ends at full expansion
+      curvePoints: [          // Single shared curve for all variables
+        { x: 0, y: 0 },       // Start: contracted state (curve = 0)
+        { x: 1, y: 1 },       // End: expanded state (curve = 1)
+      ],
+      variables: [
+        {
+          id: 'roundness',
+          name: 'Roundness',
+          min: 0.01,            // Value at curve=0 (contracted)
+          max: 0.15,            // Value at curve=1 (expanded)
+        },
+        {
+          id: 'squircle',
+          name: 'Squircle',
+          min: 2.0,             // Value at curve=0: standard circle (n=2)
+          max: 5.0,             // Value at curve=1: iOS-style squircle (n=5)
+        },
+      ],
+    },
+    {
+      id: 'focus',
+      name: 'Focus',
+      enabled: true,
+      mode: 'animate',        // Always plays forward on each trigger
+      startT: 0,              // Effect starts at beginning
+      endT: 1,                // Effect ends at full expansion
+      curvePoints: [          // Single curve for blur effect
+        { x: 0, y: 1 },       // Start: curve=1 (max blur)
+        { x: 1, y: 0 },       // End: curve=0 (no blur)
+      ],
+      variables: [
+        {
+          id: 'amount',
+          name: 'Blur Amount',
+          min: 0,               // No blur (sharp)
+          max: 20,              // Maximum blur amount in pixels
+        },
+      ],
     },
   ],
 };
@@ -201,20 +268,40 @@ export function DigitalMaterialLab() {
         masterProgress = animController.getProgress();
       }
 
-      // Calculate animated size based on expansion state and master progress
-      const targetSize: [number, number] = isExpanded ? EXPANDED_SIZE : CONTRACTED_SIZE;
-      const baseSize: [number, number] = isExpanded ? CONTRACTED_SIZE : EXPANDED_SIZE;
+      // Calculate expansion progress (0 = contracted, 1 = expanded)
+      // When expanding: expansionProgress goes 0→1
+      // When collapsing: expansionProgress goes 1→0
+      const expansionProgress = isExpanded ? masterProgress : (1 - masterProgress);
 
+      // Calculate current size based on expansion progress
       const currentSize: [number, number] = [
-        baseSize[0] + (targetSize[0] - baseSize[0]) * masterProgress,
-        baseSize[1] + (targetSize[1] - baseSize[1]) * masterProgress,
+        CONTRACTED_SIZE[0] + (EXPANDED_SIZE[0] - CONTRACTED_SIZE[0]) * expansionProgress,
+        CONTRACTED_SIZE[1] + (EXPANDED_SIZE[1] - CONTRACTED_SIZE[1]) * expansionProgress,
       ];
 
       // Calculate effect values
+      // - State mode effects use expansionProgress (follows state)
+      // - Animate mode effects use masterProgress (always plays forward)
       const cornerRadiusEffect = animConfig.effects.find(e => e.id === 'cornerRadius');
-      const currentCornerRadius = cornerRadiusEffect
-        ? calculateEffectValue(cornerRadiusEffect, masterProgress)
+
+      // Corner shape: roundness and squircle
+      const rawCornerRadius = cornerRadiusEffect
+        ? calculateVariableValue(cornerRadiusEffect, 'roundness', expansionProgress, masterProgress)
         : uniforms.cornerRadius;
+      const squircleAmount = cornerRadiusEffect
+        ? calculateVariableValue(cornerRadiusEffect, 'squircle', expansionProgress, masterProgress)
+        : 2.0;
+
+      // Clamp corner radius to half the shortest edge to prevent pinching
+      // currentSize stores half-dimensions, so min(w, h) gives us the max valid radius
+      const maxCornerRadius = Math.min(currentSize[0], currentSize[1]);
+      const currentCornerRadius = Math.min(rawCornerRadius, maxCornerRadius);
+
+      // Calculate focus (blur) effect
+      const focusEffect = animConfig.effects.find(e => e.id === 'focus');
+      const blurAmount = focusEffect
+        ? calculateVariableValue(focusEffect, 'amount', expansionProgress, masterProgress)
+        : 0;
 
       gl.useProgram(program);
 
@@ -236,6 +323,8 @@ export function DigitalMaterialLab() {
       // Geometry - use calculated effect values
       setUniform2f('u_rectSize', currentSize[0], currentSize[1]);
       setUniform1f('u_cornerRadius', currentCornerRadius);
+      setUniform1f('u_squircle', squircleAmount);
+      setUniform1f('u_blur', blurAmount);
 
       // Digital Material
       setUniform1f('u_viscosity', uniforms.viscosity);

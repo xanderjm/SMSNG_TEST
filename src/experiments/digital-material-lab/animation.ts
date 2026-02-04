@@ -72,6 +72,59 @@ function bezierY(t: number, y1: number, y2: number): number {
   return 3 * mt2 * t * y1 + 3 * mt * t2 * y2 + t3;
 }
 
+/**
+ * Evaluate bezier Y with custom start/end Y values
+ * P0.y = y0, P1.y = y1, P2.y = y2, P3.y = y3
+ */
+function bezierYFull(t: number, y0: number, y1: number, y2: number, y3: number): number {
+  const t2 = t * t;
+  const t3 = t2 * t;
+  const mt = 1 - t;
+  const mt2 = mt * mt;
+  const mt3 = mt2 * mt;
+  return mt3 * y0 + 3 * mt2 * t * y1 + 3 * mt * t2 * y2 + t3 * y3;
+}
+
+/**
+ * Solve for bezier parameter t given x value
+ * Uses Newton-Raphson iteration
+ */
+export function solveBezierT(x: number, x1: number, x2: number): number {
+  const epsilon = 1e-6;
+  let tGuess = x;
+
+  for (let i = 0; i < 8; i++) {
+    const currentX = bezierX(tGuess, x1, x2) - x;
+    if (Math.abs(currentX) < epsilon) break;
+    const dx = bezierDX(tGuess, x1, x2);
+    if (Math.abs(dx) < epsilon) break;
+    tGuess -= currentX / dx;
+    tGuess = Math.max(0, Math.min(1, tGuess));
+  }
+
+  return tGuess;
+}
+
+/**
+ * Evaluate bezier curve with custom Y endpoints
+ * This allows curves where start and end are the same but control points create a parabola
+ *
+ * @param x - The x position (0-1)
+ * @param curve - [x1, y1, x2, y2] control points
+ * @param yStart - Y value at x=0
+ * @param yEnd - Y value at x=1
+ */
+export function cubicBezierWithEndpoints(
+  x: number,
+  curve: BezierCurve,
+  yStart: number,
+  yEnd: number
+): number {
+  const [x1, y1, x2, y2] = curve;
+  const t = solveBezierT(x, x1, x2);
+  return bezierYFull(t, yStart, y1, y2, yEnd);
+}
+
 function bezierDX(t: number, x1: number, x2: number): number {
   const t2 = t * t;
   const mt = 1 - t;

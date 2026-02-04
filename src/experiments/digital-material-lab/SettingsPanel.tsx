@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { ChevronDown, ChevronRight, Copy, Download, Upload } from 'lucide-react';
 import type { MaterialUniforms, AnimationConfig, Effect } from './index';
+import { MultiPointCurveEditor } from './MultiPointCurveEditor';
 import { BezierCurveEditor } from './BezierCurveEditor';
 import { CURVES } from './animation';
 import type { BezierCurve } from './animation';
@@ -24,11 +25,11 @@ interface SliderProps {
 
 function Slider({ label, value, min, max, step = 0.01, onChange, unit = '' }: SliderProps) {
   return (
-    <div className="mb-3">
-      <div className="flex justify-between items-center mb-1">
-        <span className="text-xs text-gray-400">{label}</span>
-        <span className="text-xs text-gray-500 font-mono">
-          {value.toFixed(3)}{unit}
+    <div className="mb-4">
+      <div className="flex justify-between items-center mb-1.5">
+        <span className="text-[11px] font-medium text-neutral-600">{label}</span>
+        <span className="text-[10px] text-neutral-400 font-mono">
+          {value.toFixed(2)}{unit}
         </span>
       </div>
       <input
@@ -38,7 +39,16 @@ function Slider({ label, value, min, max, step = 0.01, onChange, unit = '' }: Sl
         step={step}
         value={value}
         onChange={(e) => onChange(parseFloat(e.target.value))}
-        className="w-full h-2 bg-[#2a2a3e] rounded-lg appearance-none cursor-pointer accent-violet-500"
+        className="w-full h-1 bg-neutral-200 rounded-full appearance-none cursor-pointer
+                   [&::-webkit-slider-thumb]:appearance-none
+                   [&::-webkit-slider-thumb]:w-3
+                   [&::-webkit-slider-thumb]:h-3
+                   [&::-webkit-slider-thumb]:rounded-full
+                   [&::-webkit-slider-thumb]:bg-neutral-800
+                   [&::-webkit-slider-thumb]:cursor-pointer
+                   [&::-webkit-slider-thumb]:border-2
+                   [&::-webkit-slider-thumb]:border-white
+                   [&::-webkit-slider-thumb]:shadow-sm"
       />
     </div>
   );
@@ -53,39 +63,39 @@ interface TimelineRangeProps {
 
 function TimelineRange({ startT, endT, onStartChange, onEndChange }: TimelineRangeProps) {
   return (
-    <div className="mb-3">
-      <div className="flex justify-between items-center mb-1">
-        <span className="text-xs text-gray-400">Timeline Position</span>
-        <span className="text-xs text-gray-500 font-mono">
-          {(startT * 100).toFixed(0)}% → {(endT * 100).toFixed(0)}%
+    <div className="mb-4">
+      <div className="flex justify-between items-center mb-1.5">
+        <span className="text-[11px] font-medium text-neutral-600">Timeline</span>
+        <span className="text-[10px] text-neutral-400 font-mono">
+          {(startT * 100).toFixed(0)}% — {(endT * 100).toFixed(0)}%
         </span>
       </div>
 
       {/* Visual timeline bar */}
-      <div className="relative h-6 bg-[#1a1a24] rounded border border-[#2a2a3e] mb-2">
-        {/* Active range indicator */}
+      <div className="relative h-5 bg-neutral-100 rounded border border-neutral-200 mb-2">
+        {/* Active range */}
         <div
-          className="absolute top-1 bottom-1 bg-violet-500/30 rounded"
+          className="absolute top-0.5 bottom-0.5 bg-neutral-800 rounded-sm"
           style={{
             left: `${startT * 100}%`,
             width: `${(endT - startT) * 100}%`,
           }}
         />
-        {/* Start marker */}
+        {/* Start handle */}
         <div
-          className="absolute top-0 bottom-0 w-1 bg-emerald-500 rounded"
-          style={{ left: `calc(${startT * 100}% - 2px)` }}
+          className="absolute top-0 bottom-0 w-0.5 bg-emerald-500"
+          style={{ left: `${startT * 100}%` }}
         />
-        {/* End marker */}
+        {/* End handle */}
         <div
-          className="absolute top-0 bottom-0 w-1 bg-rose-500 rounded"
-          style={{ left: `calc(${endT * 100}% - 2px)` }}
+          className="absolute top-0 bottom-0 w-0.5 bg-rose-500"
+          style={{ left: `${endT * 100}%` }}
         />
       </div>
 
-      <div className="space-y-1">
+      <div className="grid grid-cols-2 gap-3">
         <div className="flex items-center gap-2">
-          <span className="text-[10px] text-emerald-400 w-8">Start</span>
+          <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
           <input
             type="range"
             min={0}
@@ -96,11 +106,17 @@ function TimelineRange({ startT, endT, onStartChange, onEndChange }: TimelineRan
               const newStart = parseFloat(e.target.value);
               if (newStart < endT) onStartChange(newStart);
             }}
-            className="flex-1 h-1.5 bg-[#2a2a3e] rounded-lg appearance-none cursor-pointer accent-emerald-500"
+            className="flex-1 h-1 bg-neutral-200 rounded-full appearance-none cursor-pointer
+                       [&::-webkit-slider-thumb]:appearance-none
+                       [&::-webkit-slider-thumb]:w-2.5
+                       [&::-webkit-slider-thumb]:h-2.5
+                       [&::-webkit-slider-thumb]:rounded-full
+                       [&::-webkit-slider-thumb]:bg-emerald-500
+                       [&::-webkit-slider-thumb]:cursor-pointer"
           />
         </div>
         <div className="flex items-center gap-2">
-          <span className="text-[10px] text-rose-400 w-8">End</span>
+          <div className="w-1.5 h-1.5 rounded-full bg-rose-500" />
           <input
             type="range"
             min={0}
@@ -111,7 +127,13 @@ function TimelineRange({ startT, endT, onStartChange, onEndChange }: TimelineRan
               const newEnd = parseFloat(e.target.value);
               if (newEnd > startT) onEndChange(newEnd);
             }}
-            className="flex-1 h-1.5 bg-[#2a2a3e] rounded-lg appearance-none cursor-pointer accent-rose-500"
+            className="flex-1 h-1 bg-neutral-200 rounded-full appearance-none cursor-pointer
+                       [&::-webkit-slider-thumb]:appearance-none
+                       [&::-webkit-slider-thumb]:w-2.5
+                       [&::-webkit-slider-thumb]:h-2.5
+                       [&::-webkit-slider-thumb]:rounded-full
+                       [&::-webkit-slider-thumb]:bg-rose-500
+                       [&::-webkit-slider-thumb]:cursor-pointer"
           />
         </div>
       </div>
@@ -127,81 +149,73 @@ interface EffectEditorProps {
 function EffectEditor({ effect, onChange }: EffectEditorProps) {
   const [showCurve, setShowCurve] = useState(true);
 
-  const curvePresets: { name: string; curve: BezierCurve }[] = [
-    { name: 'linear', curve: CURVES.linear },
-    { name: 'ease', curve: CURVES.ease },
-    { name: 'ease-out', curve: CURVES.easeOut },
-    { name: 'elastic', curve: CURVES.elastic },
-  ];
-
   // Calculate actual values at contracted/expanded states
-  const contractedVal = effect.min + (effect.max - effect.min) * effect.curveStart;
-  const expandedVal = effect.min + (effect.max - effect.min) * effect.curveEnd;
+  const startValue = effect.curvePoints[0]?.y ?? 0;
+  const endValue = effect.curvePoints[effect.curvePoints.length - 1]?.y ?? 1;
+  const contractedVal = effect.min + (effect.max - effect.min) * startValue;
+  const expandedVal = effect.min + (effect.max - effect.min) * endValue;
 
   return (
-    <div className="bg-[#1a1a24] rounded-lg p-3 border border-[#2a2a3e]">
-      {/* Header with enable toggle */}
-      <div className="flex items-center justify-between mb-3">
-        <span className="text-sm font-medium text-gray-300">{effect.name}</span>
+    <div className="bg-white rounded-lg p-4 border border-neutral-200">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-4">
+        <span className="text-sm font-semibold text-neutral-800">{effect.name}</span>
         <button
           onClick={() => onChange({ ...effect, enabled: !effect.enabled })}
-          className={`px-2 py-0.5 rounded text-xs transition-colors ${
-            effect.enabled
-              ? 'bg-violet-500/20 text-violet-300'
-              : 'bg-gray-700/30 text-gray-500'
+          className={`w-10 h-5 rounded-full transition-colors relative ${
+            effect.enabled ? 'bg-neutral-800' : 'bg-neutral-200'
           }`}
         >
-          {effect.enabled ? 'ON' : 'OFF'}
+          <div
+            className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${
+              effect.enabled ? 'translate-x-5' : 'translate-x-0.5'
+            }`}
+          />
         </button>
       </div>
 
       {effect.enabled && (
         <>
-          {/* Min/Max Range */}
-          <div className="mb-3">
-            <div className="flex justify-between items-center mb-1">
-              <span className="text-xs text-gray-400">Effect Range</span>
-              <span className="text-xs text-gray-500 font-mono">
-                {effect.min.toFixed(3)} - {effect.max.toFixed(3)}
-              </span>
+          {/* Value Range */}
+          <div className="mb-4">
+            <div className="flex justify-between items-center mb-1.5">
+              <span className="text-[11px] font-medium text-neutral-600">Range</span>
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <span className="text-[10px] text-gray-500">Min</span>
+                <label className="text-[9px] text-neutral-400 uppercase tracking-wider">Min</label>
                 <input
                   type="number"
                   step={0.001}
                   value={effect.min}
                   onChange={(e) => onChange({ ...effect, min: parseFloat(e.target.value) || 0 })}
-                  className="w-full px-2 py-1 bg-[#2a2a3e] rounded text-xs text-gray-300 font-mono"
+                  className="w-full px-2 py-1.5 bg-neutral-50 border border-neutral-200 rounded text-xs text-neutral-800 font-mono focus:outline-none focus:border-neutral-400"
                 />
               </div>
               <div>
-                <span className="text-[10px] text-gray-500">Max</span>
+                <label className="text-[9px] text-neutral-400 uppercase tracking-wider">Max</label>
                 <input
                   type="number"
                   step={0.001}
                   value={effect.max}
                   onChange={(e) => onChange({ ...effect, max: parseFloat(e.target.value) || 0 })}
-                  className="w-full px-2 py-1 bg-[#2a2a3e] rounded text-xs text-gray-300 font-mono"
+                  className="w-full px-2 py-1.5 bg-neutral-50 border border-neutral-200 rounded text-xs text-neutral-800 font-mono focus:outline-none focus:border-neutral-400"
                 />
               </div>
             </div>
           </div>
 
-          {/* State values display */}
-          <div className="mb-3 p-2 bg-[#0d0d14] rounded text-[10px] font-mono">
-            <div className="flex justify-between">
-              <span className="text-emerald-400">
-                Contracted: {contractedVal.toFixed(4)}
-              </span>
-              <span className="text-rose-400">
-                Expanded: {expandedVal.toFixed(4)}
-              </span>
-            </div>
+          {/* Current State Values */}
+          <div className="mb-4 flex justify-between text-[10px] font-mono px-1">
+            <span className="text-emerald-600">
+              Contracted: {contractedVal.toFixed(4)}
+            </span>
+            <span className="text-rose-600">
+              Expanded: {expandedVal.toFixed(4)}
+            </span>
           </div>
 
-          {/* Timeline Position - when does effect transition */}
+          {/* Timeline Position */}
           <TimelineRange
             startT={effect.startT}
             endT={effect.endT}
@@ -209,47 +223,31 @@ function EffectEditor({ effect, onChange }: EffectEditorProps) {
             onEndChange={(v) => onChange({ ...effect, endT: v })}
           />
 
-          {/* Curve Editor Toggle */}
-          <button
-            onClick={() => setShowCurve(!showCurve)}
-            className="w-full flex items-center justify-between py-2 text-xs text-gray-400 active:text-white transition-colors"
-          >
-            <span>Motion Curve</span>
-            {showCurve ? (
-              <ChevronDown className="w-3 h-3" />
-            ) : (
-              <ChevronRight className="w-3 h-3" />
-            )}
-          </button>
+          {/* Curve Editor */}
+          <div className="border-t border-neutral-100 pt-3 mt-3">
+            <button
+              onClick={() => setShowCurve(!showCurve)}
+              className="w-full flex items-center justify-between py-1 text-[11px] font-medium text-neutral-600"
+            >
+              <span>Curve</span>
+              {showCurve ? (
+                <ChevronDown className="w-3.5 h-3.5" />
+              ) : (
+                <ChevronRight className="w-3.5 h-3.5" />
+              )}
+            </button>
 
-          {showCurve && (
-            <div className="mt-2">
-              <p className="text-[10px] text-gray-500 mb-2">
-                Green = contracted value, Red = expanded value (drag to adjust)
-              </p>
-              <BezierCurveEditor
-                value={effect.curve}
-                onChange={(curve) => onChange({ ...effect, curve })}
-                curveStart={effect.curveStart}
-                curveEnd={effect.curveEnd}
-                onCurveStartChange={(v) => onChange({ ...effect, curveStart: v })}
-                onCurveEndChange={(v) => onChange({ ...effect, curveEnd: v })}
-                width={220}
-                height={140}
-              />
-              <div className="flex flex-wrap gap-1 mt-2">
-                {curvePresets.map((preset) => (
-                  <button
-                    key={preset.name}
-                    onClick={() => onChange({ ...effect, curve: preset.curve })}
-                    className="px-2 py-0.5 text-[10px] rounded bg-[#2a2a3e] text-gray-400 active:bg-[#3a3a4e] active:text-white transition-colors"
-                  >
-                    {preset.name}
-                  </button>
-                ))}
+            {showCurve && (
+              <div className="mt-2">
+                <MultiPointCurveEditor
+                  points={effect.curvePoints}
+                  onChange={(curvePoints) => onChange({ ...effect, curvePoints })}
+                  width={232}
+                  height={140}
+                />
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </>
       )}
     </div>
@@ -266,20 +264,20 @@ function Section({ title, children, defaultOpen = true }: SectionProps) {
   const [isOpen, setIsOpen] = useState(defaultOpen);
 
   return (
-    <div className="border-b border-[#2a2a3e] last:border-b-0">
+    <div className="border-b border-neutral-100 last:border-b-0">
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="w-full flex items-center justify-between py-3 px-4 text-sm font-medium text-gray-300 active:text-white transition-colors"
+        className="w-full flex items-center justify-between py-3 px-5 text-xs font-semibold text-neutral-700 uppercase tracking-wider"
       >
         <span>{title}</span>
         {isOpen ? (
-          <ChevronDown className="w-4 h-4 text-gray-500" />
+          <ChevronDown className="w-4 h-4 text-neutral-400" />
         ) : (
-          <ChevronRight className="w-4 h-4 text-gray-500" />
+          <ChevronRight className="w-4 h-4 text-neutral-400" />
         )}
       </button>
       {isOpen && (
-        <div className="px-4 pb-4">
+        <div className="px-5 pb-5">
           {children}
         </div>
       )}
@@ -358,11 +356,11 @@ export function SettingsPanel({
   const cornerRadiusEffect = animConfig.effects.find(e => e.id === 'cornerRadius');
 
   return (
-    <div className="w-80 bg-[#12121a]/95 backdrop-blur-xl border-l border-[#2a2a3e] flex flex-col overflow-hidden">
+    <div className="w-72 bg-neutral-50 border-l border-neutral-200 flex flex-col overflow-hidden">
       {/* Header */}
-      <div className="p-4 border-b border-[#2a2a3e]">
-        <h2 className="text-sm font-semibold text-white">Settings</h2>
-        <p className="text-xs text-gray-500">Digital Material Lab</p>
+      <div className="p-5 border-b border-neutral-200">
+        <h2 className="text-sm font-bold text-neutral-900">Settings</h2>
+        <p className="text-[10px] text-neutral-400 mt-0.5">Digital Material Lab</p>
       </div>
 
       {/* Content */}
@@ -379,18 +377,20 @@ export function SettingsPanel({
             unit="ms"
           />
 
-          <div className="mb-3">
-            <span className="text-xs text-gray-400 block mb-2">Master Curve</span>
+          <div className="mb-4">
+            <span className="text-[11px] font-medium text-neutral-600 block mb-2">Master Curve</span>
             <BezierCurveEditor
               value={animConfig.curve}
               onChange={(curve) => onAnimConfigChange({ ...animConfig, curve })}
+              width={232}
+              height={100}
             />
-            <div className="flex flex-wrap gap-1 mt-2">
+            <div className="flex flex-wrap gap-1.5 mt-2">
               {curvePresets.map((preset) => (
                 <button
                   key={preset.name}
                   onClick={() => onAnimConfigChange({ ...animConfig, curve: preset.curve })}
-                  className="px-2 py-1 text-xs rounded bg-[#2a2a3e] text-gray-400 active:bg-[#3a3a4e] active:text-white transition-colors"
+                  className="px-2.5 py-1 text-[10px] rounded-full bg-white border border-neutral-200 text-neutral-600 hover:border-neutral-400 transition-colors"
                 >
                   {preset.name}
                 </button>
@@ -410,7 +410,7 @@ export function SettingsPanel({
         </Section>
 
         {/* Digital Physics Section */}
-        <Section title="Digital Physics" defaultOpen={false}>
+        <Section title="Physics" defaultOpen={false}>
           <Slider
             label="Viscosity"
             value={uniforms.viscosity}
@@ -440,7 +440,7 @@ export function SettingsPanel({
             onChange={(v) => updateUniform('momentum', v)}
           />
           <Slider
-            label="Grav. Attention"
+            label="Gravity Attention"
             value={uniforms.gravAttention}
             min={0}
             max={1}
@@ -450,28 +450,28 @@ export function SettingsPanel({
       </div>
 
       {/* Footer */}
-      <div className="p-4 border-t border-[#2a2a3e]">
+      <div className="p-4 border-t border-neutral-200 bg-white">
         <div className="flex gap-2">
           <button
             onClick={handleExport}
-            className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-violet-500/20 text-violet-300 active:bg-violet-500/30 transition-colors text-sm"
+            className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-neutral-900 text-white text-xs font-medium hover:bg-neutral-800 transition-colors"
           >
-            <Download className="w-4 h-4" />
+            <Download className="w-3.5 h-3.5" />
             Export
           </button>
           <button
             onClick={handleImport}
-            className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-[#2a2a3e] text-gray-300 active:bg-[#3a3a4e] transition-colors text-sm"
+            className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-white border border-neutral-200 text-neutral-700 text-xs font-medium hover:bg-neutral-50 transition-colors"
           >
-            <Upload className="w-4 h-4" />
+            <Upload className="w-3.5 h-3.5" />
             Import
           </button>
           <button
             onClick={handleCopy}
-            className="px-3 py-2 rounded-lg bg-[#2a2a3e] text-gray-300 active:bg-[#3a3a4e] transition-colors"
+            className="px-3 py-2 rounded-lg bg-white border border-neutral-200 text-neutral-700 hover:bg-neutral-50 transition-colors"
             title="Copy to clipboard"
           >
-            <Copy className="w-4 h-4" />
+            <Copy className="w-3.5 h-3.5" />
           </button>
         </div>
       </div>

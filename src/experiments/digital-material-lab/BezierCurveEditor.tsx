@@ -105,7 +105,7 @@ export function BezierCurveEditor({
         ref={svgRef}
         width={width}
         height={height}
-        className="bg-[#1a1a24] rounded-lg border border-[#2a2a3e]"
+        className="bg-white rounded border border-neutral-200"
         style={{ cursor: dragging ? 'grabbing' : 'default' }}
       >
         {/* Grid */}
@@ -121,7 +121,7 @@ export function BezierCurveEditor({
             <path
               d={`M ${innerWidth / 4} 0 L 0 0 0 ${innerHeight / 4}`}
               fill="none"
-              stroke="#2a2a3e"
+              stroke="#f5f5f5"
               strokeWidth="1"
             />
           </pattern>
@@ -140,7 +140,7 @@ export function BezierCurveEditor({
           y1={p0.y}
           x2={p3.x}
           y2={p3.y}
-          stroke="#2a2a3e"
+          stroke="#e5e5e5"
           strokeWidth="1"
           strokeDasharray="4 4"
         />
@@ -177,8 +177,8 @@ export function BezierCurveEditor({
           y1={p0.y}
           x2={p1.x}
           y2={p1.y}
-          stroke="#6366f1"
-          strokeWidth="1.5"
+          stroke="#a3a3a3"
+          strokeWidth="1"
           opacity="0.5"
         />
         <line
@@ -186,8 +186,8 @@ export function BezierCurveEditor({
           y1={p3.y}
           x2={p2.x}
           y2={p2.y}
-          stroke="#6366f1"
-          strokeWidth="1.5"
+          stroke="#a3a3a3"
+          strokeWidth="1"
           opacity="0.5"
         />
 
@@ -195,7 +195,7 @@ export function BezierCurveEditor({
         <path
           d={pathD}
           fill="none"
-          stroke="#a78bfa"
+          stroke="#171717"
           strokeWidth="2"
           strokeLinecap="round"
         />
@@ -204,9 +204,9 @@ export function BezierCurveEditor({
         <circle
           cx={p0.x}
           cy={p0.y}
-          r={hasAdjustableEndpoints ? 6 : 4}
-          fill={hasAdjustableEndpoints ? '#10b981' : '#1a1a24'}
-          stroke={hasAdjustableEndpoints ? '#fff' : '#6366f1'}
+          r={hasAdjustableEndpoints ? 5 : 4}
+          fill={hasAdjustableEndpoints ? '#10b981' : 'white'}
+          stroke={hasAdjustableEndpoints ? 'white' : '#171717'}
           strokeWidth="2"
           style={{ cursor: hasAdjustableEndpoints ? 'ns-resize' : 'default' }}
           onMouseDown={handleMouseDown('p0')}
@@ -216,9 +216,9 @@ export function BezierCurveEditor({
         <circle
           cx={p3.x}
           cy={p3.y}
-          r={hasAdjustableEndpoints ? 6 : 4}
-          fill={hasAdjustableEndpoints ? '#f43f5e' : '#1a1a24'}
-          stroke={hasAdjustableEndpoints ? '#fff' : '#6366f1'}
+          r={hasAdjustableEndpoints ? 5 : 4}
+          fill={hasAdjustableEndpoints ? '#f43f5e' : 'white'}
+          stroke={hasAdjustableEndpoints ? 'white' : '#171717'}
           strokeWidth="2"
           style={{ cursor: hasAdjustableEndpoints ? 'ns-resize' : 'default' }}
           onMouseDown={handleMouseDown('p3')}
@@ -228,9 +228,9 @@ export function BezierCurveEditor({
         <circle
           cx={p1.x}
           cy={p1.y}
-          r="6"
-          fill="#6366f1"
-          stroke="#fff"
+          r="4"
+          fill="#171717"
+          stroke="white"
           strokeWidth="2"
           style={{ cursor: 'grab' }}
           onMouseDown={handleMouseDown('p1')}
@@ -240,9 +240,9 @@ export function BezierCurveEditor({
         <circle
           cx={p2.x}
           cy={p2.y}
-          r="6"
-          fill="#6366f1"
-          stroke="#fff"
+          r="4"
+          fill="#171717"
+          stroke="white"
           strokeWidth="2"
           style={{ cursor: 'grab' }}
           onMouseDown={handleMouseDown('p2')}
@@ -250,16 +250,16 @@ export function BezierCurveEditor({
       </svg>
 
       {/* Numeric values */}
-      <div className="flex justify-between mt-2 text-[10px] font-mono">
+      <div className="flex justify-between mt-2 text-[9px] font-mono text-neutral-400">
         {hasAdjustableEndpoints ? (
           <>
-            <span className="text-emerald-400">Start: {startY.toFixed(2)}</span>
-            <span className="text-rose-400">End: {endY.toFixed(2)}</span>
+            <span className="text-emerald-600">Start: {startY.toFixed(2)}</span>
+            <span className="text-rose-600">End: {endY.toFixed(2)}</span>
           </>
         ) : (
           <>
-            <span className="text-gray-500">({x1.toFixed(2)}, {y1.toFixed(2)})</span>
-            <span className="text-gray-500">({x2.toFixed(2)}, {y2.toFixed(2)})</span>
+            <span>P1: ({x1.toFixed(2)}, {y1.toFixed(2)})</span>
+            <span>P2: ({x2.toFixed(2)}, {y2.toFixed(2)})</span>
           </>
         )}
       </div>

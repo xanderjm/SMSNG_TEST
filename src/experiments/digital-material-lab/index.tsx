@@ -3,11 +3,13 @@ import { Link } from 'react-router-dom';
 import { ArrowLeft, RotateCcw } from 'lucide-react';
 import { SettingsPanel } from './SettingsPanel';
 import { createWebGLContext, compileShader, createProgram } from './webgl';
-import { AnimationController, cubicBezierWithEndpoints } from './animation';
+import { AnimationController } from './animation';
+import type { CurvePoint } from './MultiPointCurveEditor';
+import { evaluateCatmullRom } from './MultiPointCurveEditor';
 import { vertexShaderSource, fragmentShaderSource } from './shaders';
 
 // Effect definition - the basis for all animated effects
-// Effects interpolate between curveStart and curveEnd based on expansion progress (0=contracted, 1=expanded)
+// Effects use a multi-point curve to define how the value changes during expansion
 export interface Effect {
   id: string;
   name: string;
@@ -16,9 +18,7 @@ export interface Effect {
   max: number;             // Maximum possible value (absolute)
   startT: number;          // When effect starts transitioning (0-1 of expansion)
   endT: number;            // When effect finishes transitioning (0-1 of expansion)
-  curveStart: number;      // Value at startT (0-1, maps to min-max range)
-  curveEnd: number;        // Value at endT (0-1, maps to min-max range)
-  curve: [number, number, number, number];  // Bezier control points [x1, y1, x2, y2]
+  curvePoints: CurvePoint[];  // Multi-point curve (x=timeline position, y=effect value 0-1)
 }
 
 export interface MaterialUniforms {
@@ -44,28 +44,30 @@ export interface AnimationConfig {
 // Calculate the current value of an effect based on expansion progress
 // expansionProgress: 0 = fully contracted, 1 = fully expanded
 export function calculateEffectValue(effect: Effect, expansionProgress: number): number {
-  const { startT, endT, min, max, curveStart, curveEnd, curve, enabled } = effect;
+  const { startT, endT, min, max, curvePoints, enabled } = effect;
+
+  // Get start and end values from curve points
+  const startValue = curvePoints[0]?.y ?? 0;
+  const endValue = curvePoints[curvePoints.length - 1]?.y ?? 1;
 
   // If disabled, return the value at curve start position (contracted state)
   if (!enabled) {
-    return min + (max - min) * curveStart;
+    return min + (max - min) * startValue;
   }
 
   // Before effect's timeline window - stay at start value
   if (expansionProgress <= startT) {
-    return min + (max - min) * curveStart;
+    return min + (max - min) * startValue;
   }
 
   // After effect's timeline window - stay at end value
   if (expansionProgress >= endT) {
-    return min + (max - min) * curveEnd;
+    return min + (max - min) * endValue;
   }
 
-  // During effect's timeline window - interpolate using curve
-  // The curve evaluates with curveStart and curveEnd as the actual Y endpoints
-  // This allows parabolic curves where start=end but the curve bulges in the middle
+  // During effect's timeline window - interpolate using multi-point curve
   const localProgress = (expansionProgress - startT) / (endT - startT);
-  const curveOutput = cubicBezierWithEndpoints(localProgress, curve, curveStart, curveEnd);
+  const curveOutput = evaluateCatmullRom(curvePoints, localProgress);
 
   // curveOutput is already in 0-1 effect space, map to min-max
   return min + (max - min) * curveOutput;
@@ -100,9 +102,10 @@ const defaultAnimConfig: AnimationConfig = {
       max: 0.15,              // Maximum corner radius
       startT: 0,              // Effect starts at beginning of expansion
       endT: 1,                // Effect ends at full expansion
-      curveStart: 0,          // At contracted: min (0.01)
-      curveEnd: 1,            // At expanded: max (0.15)
-      curve: [0.4, 0, 0.2, 1], // Simple ease
+      curvePoints: [          // Multi-point curve (add points by double-clicking)
+        { x: 0, y: 0 },       // Start: contracted state (min value)
+        { x: 1, y: 1 },       // End: expanded state (max value)
+      ],
     },
   ],
 };

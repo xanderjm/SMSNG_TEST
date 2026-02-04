@@ -2,7 +2,7 @@
 
 ## Overview
 
-The effect system provides a unified way to animate any property between two states (contracted and expanded) with full control over timing and easing.
+The effect system provides a unified way to animate any property between two states (contracted and expanded) with full control over timing and multi-point curves.
 
 ## Core Concepts
 
@@ -30,24 +30,28 @@ interface Effect {
   max: number;                   // Maximum possible value (absolute)
   startT: number;                // When effect starts (0-1 of expansion)
   endT: number;                  // When effect ends (0-1 of expansion)
-  curveStart: number;            // Y value at contracted (0-1 of min-max range)
-  curveEnd: number;              // Y value at expanded (0-1 of min-max range)
-  curve: [number, number, number, number];  // Bezier control points [x1, y1, x2, y2]
+  curvePoints: CurvePoint[];     // Multi-point curve defining the effect shape
+}
+
+interface CurvePoint {
+  x: number;  // 0-1 position on timeline
+  y: number;  // 0-1 effect value (maps to min-max range)
 }
 ```
 
 ### How Values Are Calculated
 
 1. **Timeline Window** (`startT` to `endT`): Defines when the effect transitions during expansion
-   - Before `startT`: effect stays at `curveStart` value
-   - After `endT`: effect stays at `curveEnd` value
-   - Between: effect transitions using the bezier curve
+   - Before `startT`: effect stays at first point's Y value
+   - After `endT`: effect stays at last point's Y value
+   - Between: effect follows the multi-point curve
 
-2. **Bezier Curve**: The curve controls HOW the effect transitions
-   - `curveStart` and `curveEnd` are the Y endpoints of the curve
-   - `curve[1]` (y1) and `curve[3]` (y2) are control point Y values
-   - Control points can exceed 0-1 range for overshoot effects
-   - **Important**: If `curveStart = curveEnd` but control points differ, the curve creates a parabolic effect (peaks in the middle)
+2. **Multi-Point Curve**: Uses Catmull-Rom interpolation for smooth curves
+   - First point (green) = contracted state value
+   - Last point (red) = expanded state value
+   - **Double-click** on curve area to add intermediate points
+   - **Double-click** on a point to remove it (except start/end)
+   - Allows complex curves like parabolas, S-curves, multi-peak effects
 
 3. **Final Value**: `min + (max - min) * curveOutput`
 
@@ -62,9 +66,29 @@ interface Effect {
   max: 0.15,           // Maximum corner radius
   startT: 0,           // Start transitioning immediately
   endT: 1,             // Finish at full expansion
-  curveStart: 0,       // At contracted: use min (0.01)
-  curveEnd: 1,         // At expanded: use max (0.15)
-  curve: [0.4, 0, 0.2, 1],  // Ease curve
+  curvePoints: [
+    { x: 0, y: 0 },    // Contracted: min value
+    { x: 1, y: 1 },    // Expanded: max value
+  ],
+}
+```
+
+### Parabolic Effect Example
+
+```typescript
+{
+  id: 'bounce',
+  name: 'Bounce Effect',
+  enabled: true,
+  min: 0,
+  max: 1,
+  startT: 0,
+  endT: 1,
+  curvePoints: [
+    { x: 0, y: 0 },     // Start at 0
+    { x: 0.5, y: 0.8 }, // Peak at 80% in the middle
+    { x: 1, y: 0 },     // Return to 0
+  ],
 }
 ```
 
@@ -77,18 +101,18 @@ const defaultAnimConfig: AnimationConfig = {
   duration: 800,
   curve: [0.34, 1.56, 0.64, 1],
   effects: [
-    // Existing effects...
     {
-      id: 'myNewEffect',           // Unique ID
-      name: 'My New Effect',       // UI display name
+      id: 'myNewEffect',
+      name: 'My New Effect',
       enabled: true,
-      min: 0,                      // Minimum value
-      max: 1,                      // Maximum value
-      startT: 0,                   // Timeline start
-      endT: 1,                     // Timeline end
-      curveStart: 0,               // Value at contracted (0 = min)
-      curveEnd: 1,                 // Value at expanded (1 = max)
-      curve: [0.4, 0, 0.2, 1],     // Easing curve
+      min: 0,
+      max: 1,
+      startT: 0,
+      endT: 1,
+      curvePoints: [
+        { x: 0, y: 0 },
+        { x: 1, y: 1 },
+      ],
     },
   ],
 };
@@ -97,13 +121,12 @@ const defaultAnimConfig: AnimationConfig = {
 ### Step 2: Calculate the Effect Value in Render Loop
 
 ```typescript
-// In the render loop:
 const myEffect = animConfig.effects.find(e => e.id === 'myNewEffect');
 const myEffectValue = myEffect
   ? calculateEffectValue(myEffect, expansionProgress)
   : defaultValue;
 
-// Apply clamping if needed (e.g., corner radius can't exceed half the shortest edge)
+// Apply clamping if needed
 const clampedValue = Math.min(myEffectValue, maxAllowedValue);
 
 // Use in shader or geometry
@@ -112,7 +135,7 @@ setUniform1f('u_myEffect', clampedValue);
 
 ### Step 3: Add UI Controls in SettingsPanel
 
-The `EffectEditor` component automatically handles all effects. Just ensure the effect is rendered:
+The `EffectEditor` component automatically handles all effects:
 
 ```typescript
 const myEffect = animConfig.effects.find(e => e.id === 'myNewEffect');
@@ -124,73 +147,94 @@ const myEffect = animConfig.effects.find(e => e.id === 'myNewEffect');
 )}
 ```
 
-## UI Controls Explained
+## UI Controls
 
 ### Effect Range (Min/Max)
 - Defines the absolute bounds of the effect
-- The curve operates within this range
+- Curve Y values (0-1) map to this range
 
 ### State Values Display
-- **Contracted**: The actual value when `expansionProgress = 0`
-- **Expanded**: The actual value when `expansionProgress = 1`
-- Calculated as: `min + (max - min) * curveStart/curveEnd`
+- **Contracted**: Actual value when `expansionProgress = 0`
+- **Expanded**: Actual value when `expansionProgress = 1`
 
 ### Timeline Position
-- **Start**: When the effect begins transitioning (% of expansion)
-- **End**: When the effect finishes transitioning (% of expansion)
-- Example: `startT=0.2, endT=0.8` means effect transitions between 20% and 80% expanded
+- **Start**: When effect begins transitioning
+- **End**: When effect finishes transitioning
 
-### Motion Curve
-- **Green point**: Contracted value (Y position in 0-1 range)
-- **Red point**: Expanded value (Y position in 0-1 range)
-- **Control handles**: Shape of the transition curve
-- **Parabolic curves**: Set green and red to same position, but drag handles to create a curve that peaks/dips in the middle
+### Multi-Point Curve Editor
+- **Green point**: Start value (fixed at x=0)
+- **Red point**: End value (fixed at x=1)
+- **Black points**: Intermediate keyframes
+- **Double-click empty area**: Add new point
+- **Double-click existing point**: Remove point (except endpoints)
+- **Drag points**: Adjust position and value
 
 ## Curve Types
 
-### Linear (no easing)
+### Linear (default 2 points)
 ```typescript
-curve: [0, 0, 1, 1]
+curvePoints: [
+  { x: 0, y: 0 },
+  { x: 1, y: 1 },
+]
 ```
 
-### Ease (smooth start and end)
+### Ease In/Out (3 points)
 ```typescript
-curve: [0.25, 0.1, 0.25, 1]
+curvePoints: [
+  { x: 0, y: 0 },
+  { x: 0.5, y: 0.5 },
+  { x: 1, y: 1 },
+]
 ```
 
-### Ease Out (fast start, slow end)
+### Parabola (peak in middle)
 ```typescript
-curve: [0, 0, 0.58, 1]
+curvePoints: [
+  { x: 0, y: 0 },
+  { x: 0.5, y: 1 },
+  { x: 1, y: 0 },
+]
 ```
 
-### Elastic (overshoot)
+### Double Bounce
 ```typescript
-curve: [0.34, 1.56, 0.64, 1]
-```
-
-### Parabolic (same start/end, peaks in middle)
-```typescript
-curveStart: 0,
-curveEnd: 0,
-curve: [0.25, 0.8, 0.75, 0.8],  // Control points at y=0.8 create a peak
+curvePoints: [
+  { x: 0, y: 0 },
+  { x: 0.25, y: 0.6 },
+  { x: 0.5, y: 0.2 },
+  { x: 0.75, y: 0.8 },
+  { x: 1, y: 1 },
+]
 ```
 
 ## Best Practices
 
-1. **Always clamp physical values**: Corner radius should never exceed half the shortest edge
-2. **Use meaningful IDs**: Effect IDs should be descriptive and match the property name
-3. **Set sensible defaults**: Min/max should cover the useful range without allowing broken states
-4. **Consider animation direction**: Effects work the same whether expanding or collapsing
+1. **Always clamp physical values**: Corner radius shouldn't exceed half the shortest edge
+2. **Use meaningful IDs**: Match the property name
+3. **Start simple**: Begin with 2 points, add more only if needed
+4. **Test both directions**: Effects work the same expanding or collapsing
 
 ## File Structure
 
 ```
 digital-material-lab/
-├── index.tsx          # Main component, Effect interface, calculateEffectValue
-├── animation.ts       # Bezier curves, AnimationController
-├── SettingsPanel.tsx  # UI components including EffectEditor
-├── BezierCurveEditor.tsx  # Visual curve editor
-├── shaders.ts         # GLSL shaders
-├── webgl.ts           # WebGL utilities
-└── ARCHITECTURE.md    # This file
+├── index.tsx                 # Main component, Effect interface, calculateEffectValue
+├── animation.ts              # Bezier curves for master animation
+├── SettingsPanel.tsx         # UI components including EffectEditor
+├── MultiPointCurveEditor.tsx # Multi-point curve editor with Catmull-Rom
+├── BezierCurveEditor.tsx     # Bezier curve editor for master curve
+├── shaders.ts                # GLSL shaders
+├── webgl.ts                  # WebGL utilities
+└── ARCHITECTURE.md           # This file
 ```
+
+## Design System
+
+The UI follows a minimal, contemporary aesthetic:
+- **Background**: Neutral greys (neutral-50, white)
+- **Text**: Dark greys (neutral-600, neutral-800, neutral-900)
+- **Borders**: Thin, light (neutral-200)
+- **Accents**: Emerald for start/contracted, Rose for end/expanded
+- **Interactive elements**: Black fills, white strokes
+- **Curves**: Black stroke on white background

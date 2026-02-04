@@ -134,10 +134,15 @@ The corner shape effect has two variables (roundness and squircle) that share a 
 }
 ```
 
-**Squircle Explained**: The squircle parameter controls the superellipse exponent (n) for corner curves:
-- `n = 2.0`: Standard circular corners (like regular rounded rect)
-- `n = 4.0-5.0`: iOS-style squircle (smoother, more continuous corners)
-- `n > 6.0`: Very squared corners but still smooth
+**Squircle Explained**: The squircle parameter is the Lp norm exponent (n) that controls corner curve shape:
+- `n = 2.0`: Standard circular corners (Euclidean L2 norm = `length()`)
+- `n = 4.0`: True mathematical squircle (quartic superellipse)
+- `n = 5.0`: iOS-style smooth corners (Apple uses ~n=5 for app icons)
+- `n > 6.0`: Increasingly squared corners, but always smooth
+
+The implementation replaces `length(v)` with `lpLength(v, n)` where:
+- `length(v) = sqrt(v.x² + v.y²)` = `(|x|² + |y|²)^(1/2)` (circular)
+- `lpLength(v, n) = (|x|^n + |y|^n)^(1/n)` (superellipse/squircle)
 
 ### Example: Focus Effect (Animate Mode, Single Variable)
 

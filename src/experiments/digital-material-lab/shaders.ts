@@ -41,35 +41,34 @@ export const fragmentShaderSource = `
   uniform float u_momentum;
   uniform float u_gravAttention;
 
-  // Signed Distance Function for squircle-aware rounded box
-  // r = corner radius, n = squircle exponent (2.0 = circle, >2 = squircle)
-  // The squircle parameter controls the corner curve shape:
-  //   n=2: standard circular corners (like regular rounded rect)
-  //   n=4-5: iOS-style squircle corners (smoother, more continuous)
-  //   n>6: very squared corners but still smooth
-  float sdSquircleBox(vec2 p, vec2 b, float r, float n) {
-    // Get distance to inner box (the box minus the corner radius)
+  // Lp norm (generalized length function)
+  // p=2: standard Euclidean length (circular) - equivalent to length()
+  // p>2: superellipse/squircle norm (more square-ish but smooth)
+  // p=4: true squircle, p=5: Apple iOS style
+  float lpLength(vec2 v, float p) {
+    // Handle edge case where v is zero to avoid pow(0, p) issues
+    vec2 av = abs(v);
+    if (av.x < 0.0001 && av.y < 0.0001) return 0.0;
+    return pow(pow(av.x, p) + pow(av.y, p), 1.0 / p);
+  }
+
+  // Signed Distance Function for rounded box with squircle corners
+  // Based on Inigo Quilez's sdRoundedBox, but using Lp norm for corners
+  // r = corner radius
+  // n = corner exponent (2.0 = circular, >2 = squircle)
+  //     n=2: standard rounded rect (circular corners)
+  //     n=4: true squircle
+  //     n=5: iOS-style smooth corners
+  float sdRoundedBox(vec2 p, vec2 b, float r, float n) {
     vec2 q = abs(p) - b + r;
-
-    // If we're in the corner region (both q.x and q.y are positive)
-    if (q.x > 0.0 && q.y > 0.0) {
-      // Use superellipse formula for corner distance
-      // Normalize by radius to work in unit space
-      vec2 qn = q / r;
-      // Superellipse distance: (|x|^n + |y|^n)^(1/n)
-      // For n=2 this equals length(qn), giving circular corners
-      // For n>2 this gives squircle (squashed circle) corners
-      float superDist = pow(pow(qn.x, n) + pow(qn.y, n), 1.0 / n);
-      return (superDist - 1.0) * r;
-    }
-
-    // Not in corner region - use standard box distance
-    return min(max(q.x, q.y), 0.0);
+    // Standard formula: min(max(q.x,q.y),0.0) + length(max(q,0.0)) - r
+    // Replace length() with lpLength() for squircle corners
+    return min(max(q.x, q.y), 0.0) + lpLength(max(q, vec2(0.0)), n) - r;
   }
 
   // Calculate fill value for a given UV position
   float getFill(vec2 uv, float edge) {
-    float d = sdSquircleBox(uv, u_rectSize, u_cornerRadius, u_squircle);
+    float d = sdRoundedBox(uv, u_rectSize, u_cornerRadius, u_squircle);
     return 1.0 - smoothstep(-edge, edge, d);
   }
 

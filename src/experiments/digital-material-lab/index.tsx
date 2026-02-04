@@ -6,7 +6,7 @@ import { createWebGLContext, compileShader, createProgram } from './webgl';
 import { AnimationController } from './animation';
 import type { CurvePoint } from './MultiPointCurveEditor';
 import { evaluateCatmullRom } from './MultiPointCurveEditor';
-import { vertexShaderSource, fragmentShaderSource, trailFragmentShaderSource, copyFragmentShaderSource } from './shaders';
+import { vertexShaderSource, fragmentShaderSource } from './shaders';
 
 // Canvas dimensions (Samsung screen ratio)
 export const CANVAS_WIDTH = 1440;
@@ -88,9 +88,9 @@ export function calculateVariableValue(
   const startValue = curvePoints[0]?.y ?? 0;
   const endValue = curvePoints[curvePoints.length - 1]?.y ?? 1;
 
-  // If disabled, return the value at curve start position
+  // If disabled, return the minimum value (effect is "off")
   if (!enabled) {
-    return min + (max - min) * startValue;
+    return min;
   }
 
   // Before effect's timeline window - stay at start value
@@ -231,12 +231,9 @@ export function DigitalMaterialLab() {
   const [isRecording, setIsRecording] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
 
-  // Trail effect framebuffer refs
-  const trailFramebuffersRef = useRef<WebGLFramebuffer[]>([]);
-  const trailTexturesRef = useRef<WebGLTexture[]>([]);
-  const currentTrailBufferRef = useRef(0);
-  const trailProgramRef = useRef<WebGLProgram | null>(null);
-  const compositeProgramRef = useRef<WebGLProgram | null>(null);
+  // Trail effect - size history for ghost shapes
+  const sizeHistoryRef = useRef<[number, number][]>([]);
+  const TRAIL_HISTORY_LENGTH = 8;  // Store more frames, sample 4 for display
 
   // Background image texture ref
   const backgroundTextureRef = useRef<WebGLTexture | null>(null);
@@ -274,61 +271,6 @@ export function DigitalMaterialLab() {
     }
     programRef.current = program;
 
-    // Trail shader program
-    const trailFragShader = compileShader(gl, gl.FRAGMENT_SHADER, trailFragmentShaderSource);
-    if (!trailFragShader) {
-      console.error('Failed to compile trail shader');
-      return;
-    }
-    const trailProgram = createProgram(gl, vertShader, trailFragShader);
-    if (!trailProgram) {
-      console.error('Failed to create trail program');
-      return;
-    }
-    trailProgramRef.current = trailProgram;
-
-    // Copy shader program (for texture copying)
-    const copyFragShader = compileShader(gl, gl.FRAGMENT_SHADER, copyFragmentShaderSource);
-    if (!copyFragShader) {
-      console.error('Failed to compile copy shader');
-      return;
-    }
-    const copyProgram = createProgram(gl, vertShader, copyFragShader);
-    if (!copyProgram) {
-      console.error('Failed to create copy program');
-      return;
-    }
-    compositeProgramRef.current = copyProgram;
-
-    // Create framebuffers and textures for trail effect (ping-pong buffer)
-    const createFramebufferTexture = () => {
-      const texture = gl.createTexture();
-      gl.bindTexture(gl.TEXTURE_2D, texture);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, CANVAS_WIDTH, CANVAS_HEIGHT, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-
-      const framebuffer = gl.createFramebuffer();
-      gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
-      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
-
-      return { texture, framebuffer };
-    };
-
-    // Create two framebuffers for ping-pong rendering
-    const fb1 = createFramebufferTexture();
-    const fb2 = createFramebufferTexture();
-
-    if (fb1.texture && fb1.framebuffer && fb2.texture && fb2.framebuffer) {
-      trailTexturesRef.current = [fb1.texture, fb2.texture];
-      trailFramebuffersRef.current = [fb1.framebuffer, fb2.framebuffer];
-    }
-
-    // Reset to default framebuffer
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-
     const positions = new Float32Array([
       -1, -1,
        1, -1,
@@ -350,9 +292,6 @@ export function DigitalMaterialLab() {
       if (animationRef.current) {
         cancelAnimationFrame(animationRef.current);
       }
-      // Cleanup framebuffers and textures
-      trailFramebuffersRef.current.forEach(fb => fb && gl.deleteFramebuffer(fb));
-      trailTexturesRef.current.forEach(tex => tex && gl.deleteTexture(tex));
     };
   }, []);
 
@@ -605,10 +544,43 @@ export function DigitalMaterialLab() {
       setUniform1f('u_squircle', squircleAmount);
       setUniform1f('u_blur', blurAmount);
 
+      // Update size history for trail effect
+      if (trailEnabled) {
+        // Add current size to history
+        sizeHistoryRef.current.push([...currentSize]);
+        // Keep only the last N frames
+        if (sizeHistoryRef.current.length > TRAIL_HISTORY_LENGTH) {
+          sizeHistoryRef.current.shift();
+        }
+      } else {
+        // Clear history when trail is disabled
+        sizeHistoryRef.current = [];
+      }
+
+      // Sample 4 ghost sizes from history (evenly spaced)
+      const history = sizeHistoryRef.current;
+      const histLen = history.length;
+      const getHistorySize = (index: number): [number, number] => {
+        if (histLen === 0) return currentSize;
+        const i = Math.min(index, histLen - 1);
+        return history[i] || currentSize;
+      };
+
+      // Sample at 0%, 25%, 50%, 75% of history (oldest to newest)
+      const trailSize0 = getHistorySize(0);
+      const trailSize1 = getHistorySize(Math.floor(histLen * 0.33));
+      const trailSize2 = getHistorySize(Math.floor(histLen * 0.66));
+      const trailSize3 = getHistorySize(Math.max(0, histLen - 2));
+
       // Trail effect uniforms
       setUniform1f('u_trailEnabled', trailEnabled ? 1.0 : 0.0);
-      setUniform1f('u_trailPersistence', trailPersistence);
       setUniform1f('u_trailAmount', trailAmount);
+
+      // Trail ghost sizes
+      setUniform2f('u_trailSize0', trailSize0[0], trailSize0[1]);
+      setUniform2f('u_trailSize1', trailSize1[0], trailSize1[1]);
+      setUniform2f('u_trailSize2', trailSize2[0], trailSize2[1]);
+      setUniform2f('u_trailSize3', trailSize3[0], trailSize3[1]);
 
       // Trail color ramp
       setUniform3f('u_trailColor0', colors[0][0], colors[0][1], colors[0][2]);
@@ -627,14 +599,6 @@ export function DigitalMaterialLab() {
         setUniform1i('u_backgroundTexture', 0);
       }
 
-      // Trail texture (from previous frame)
-      if (trailEnabled && trailTexturesRef.current.length === 2) {
-        const readBuffer = currentTrailBufferRef.current;
-        gl.activeTexture(gl.TEXTURE1);
-        gl.bindTexture(gl.TEXTURE_2D, trailTexturesRef.current[readBuffer]);
-        setUniform1i('u_trailTexture', 1);
-      }
-
       // Digital Material
       setUniform1f('u_viscosity', uniforms.viscosity);
       setUniform1f('u_elasticity', uniforms.elasticity);
@@ -643,55 +607,9 @@ export function DigitalMaterialLab() {
       setUniform1f('u_gravAttention', uniforms.gravAttention);
 
       // Clear and draw to screen
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.clearColor(0.05, 0.05, 0.08, 1.0);
       gl.clear(gl.COLOR_BUFFER_BIT);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-
-      // Update trail buffer (ping-pong)
-      if (trailEnabled && trailTexturesRef.current.length === 2 && trailFramebuffersRef.current.length === 2 && trailProgramRef.current) {
-        const readBuffer = currentTrailBufferRef.current;
-        const writeBuffer = 1 - readBuffer;
-
-        // Render to trail buffer
-        gl.bindFramebuffer(gl.FRAMEBUFFER, trailFramebuffersRef.current[writeBuffer]);
-        gl.useProgram(trailProgramRef.current);
-
-        // Set trail shader uniforms
-        const trailProgram = trailProgramRef.current;
-        const setTrailUniform1f = (name: string, value: number) => {
-          const loc = gl.getUniformLocation(trailProgram, name);
-          if (loc) gl.uniform1f(loc, value);
-        };
-        const setTrailUniform1i = (name: string, value: number) => {
-          const loc = gl.getUniformLocation(trailProgram, name);
-          if (loc) gl.uniform1i(loc, value);
-        };
-
-        // Previous trail texture
-        gl.activeTexture(gl.TEXTURE0);
-        gl.bindTexture(gl.TEXTURE_2D, trailTexturesRef.current[readBuffer]);
-        setTrailUniform1i('u_previousTrail', 0);
-
-        // We don't have a separate current frame texture, so we use the shape's fill
-        // For simplicity, we'll reuse the trail texture and update based on persistence
-        setTrailUniform1f('u_persistence', trailPersistence);
-        setTrailUniform1f('u_trailAmount', trailAmount);
-        setTrailUniform1f('u_deltaTime', deltaTime);
-
-        // Use current frame (we need to read from screen - simplified: just decay previous)
-        gl.activeTexture(gl.TEXTURE1);
-        gl.bindTexture(gl.TEXTURE_2D, trailTexturesRef.current[readBuffer]);
-        setTrailUniform1i('u_currentFrame', 1);
-
-        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-
-        // Swap buffers
-        currentTrailBufferRef.current = writeBuffer;
-
-        // Reset to default framebuffer
-        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-      }
 
       animationRef.current = requestAnimationFrame(render);
     };

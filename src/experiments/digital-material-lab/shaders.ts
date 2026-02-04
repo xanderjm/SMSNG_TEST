@@ -37,11 +37,13 @@ export const fragmentShaderSource = `
   uniform float u_squircle;      // Superellipse exponent: 2.0 = circle, >2 = squircle
   uniform float u_blur;
 
-  // Trail effect
+  // Trail effect - ghost shapes at previous sizes
   uniform float u_trailEnabled;
-  uniform float u_trailPersistence;
   uniform float u_trailAmount;
-  uniform sampler2D u_trailTexture;
+  uniform vec2 u_trailSize0;     // Previous size 1 (oldest)
+  uniform vec2 u_trailSize1;     // Previous size 2
+  uniform vec2 u_trailSize2;     // Previous size 3
+  uniform vec2 u_trailSize3;     // Previous size 4 (newest ghost)
   uniform vec3 u_trailColor0;
   uniform vec3 u_trailColor1;
   uniform vec3 u_trailColor2;
@@ -72,10 +74,18 @@ export const fragmentShaderSource = `
     return min(max(q.x, q.y), 0.0) + lpLength(max(q, vec2(0.0)), n) - r;
   }
 
-  // Calculate fill value for a given UV position
-  float getFill(vec2 uv, float edge) {
-    float d = sdRoundedBox(uv, u_rectSize, u_cornerRadius, u_squircle);
+  // Calculate fill value for a given UV position and size
+  float getFillAtSize(vec2 uv, vec2 size, float cornerRadius, float edge) {
+    // Clamp corner radius to half the shortest edge
+    float maxRadius = min(size.x, size.y);
+    float clampedRadius = min(cornerRadius, maxRadius);
+    float d = sdRoundedBox(uv, size, clampedRadius, u_squircle);
     return 1.0 - smoothstep(-edge, edge, d);
+  }
+
+  // Calculate fill value for current shape
+  float getFill(vec2 uv, float edge) {
+    return getFillAtSize(uv, u_rectSize, u_cornerRadius, edge);
   }
 
   // Sample color from gradient ramp
@@ -86,13 +96,13 @@ export const fragmentShaderSource = `
     if (t <= u_trailColorPositions.x) {
       return u_trailColor0;
     } else if (t <= u_trailColorPositions.y) {
-      float localT = (t - u_trailColorPositions.x) / (u_trailColorPositions.y - u_trailColorPositions.x);
+      float localT = (t - u_trailColorPositions.x) / max(0.001, u_trailColorPositions.y - u_trailColorPositions.x);
       return mix(u_trailColor0, u_trailColor1, localT);
     } else if (t <= u_trailColorPositions.z) {
-      float localT = (t - u_trailColorPositions.y) / (u_trailColorPositions.z - u_trailColorPositions.y);
+      float localT = (t - u_trailColorPositions.y) / max(0.001, u_trailColorPositions.z - u_trailColorPositions.y);
       return mix(u_trailColor1, u_trailColor2, localT);
     } else if (t <= u_trailColorPositions.w) {
-      float localT = (t - u_trailColorPositions.z) / (u_trailColorPositions.w - u_trailColorPositions.z);
+      float localT = (t - u_trailColorPositions.z) / max(0.001, u_trailColorPositions.w - u_trailColorPositions.z);
       return mix(u_trailColor2, u_trailColor3, localT);
     }
     return u_trailColor3;
@@ -116,7 +126,43 @@ export const fragmentShaderSource = `
       bgColor = texture2D(u_backgroundTexture, bgUV).rgb;
     }
 
-    // Blur sampling
+    // Start with background
+    vec3 color = bgColor;
+
+    // Draw trail ghosts (oldest to newest, so newer ones layer on top)
+    if (u_trailEnabled > 0.5 && u_trailAmount > 0.01) {
+      float trailEdge = edge * 2.0;  // Softer edges for trail ghosts
+
+      // Ghost 0 (oldest) - most faded
+      float ghost0 = getFillAtSize(uv, u_trailSize0, u_cornerRadius, trailEdge);
+      if (ghost0 > 0.01) {
+        vec3 ghostColor0 = sampleColorRamp(0.0);
+        color = color + ghostColor0 * ghost0 * u_trailAmount * 0.15;
+      }
+
+      // Ghost 1
+      float ghost1 = getFillAtSize(uv, u_trailSize1, u_cornerRadius, trailEdge);
+      if (ghost1 > 0.01) {
+        vec3 ghostColor1 = sampleColorRamp(0.33);
+        color = color + ghostColor1 * ghost1 * u_trailAmount * 0.25;
+      }
+
+      // Ghost 2
+      float ghost2 = getFillAtSize(uv, u_trailSize2, u_cornerRadius, trailEdge);
+      if (ghost2 > 0.01) {
+        vec3 ghostColor2 = sampleColorRamp(0.66);
+        color = color + ghostColor2 * ghost2 * u_trailAmount * 0.35;
+      }
+
+      // Ghost 3 (newest ghost) - brightest
+      float ghost3 = getFillAtSize(uv, u_trailSize3, u_cornerRadius, trailEdge);
+      if (ghost3 > 0.01) {
+        vec3 ghostColor3 = sampleColorRamp(1.0);
+        color = color + ghostColor3 * ghost3 * u_trailAmount * 0.5;
+      }
+    }
+
+    // Blur sampling for main shape
     float fill = 0.0;
 
     if (u_blur < 0.5) {
@@ -157,29 +203,10 @@ export const fragmentShaderSource = `
       }
     }
 
-    // Sample trail from previous frame
-    vec3 trailColor = vec3(0.0);
-    if (u_trailEnabled > 0.5 && u_trailAmount > 0.01) {
-      vec4 trailSample = texture2D(u_trailTexture, v_texCoord);
-      float trailIntensity = trailSample.a;
-
-      // Color the trail using the gradient ramp based on age (stored in rgb channels)
-      float trailAge = trailSample.r;  // Age is stored in red channel
-      vec3 rampColor = sampleColorRamp(1.0 - trailAge);  // Newer trails are at end of ramp
-
-      trailColor = rampColor * trailIntensity * u_trailAmount;
-    }
-
-    // Main shape color
+    // Main shape color (white)
     vec3 fillColor = vec3(1.0);
 
-    // Compose final color: background + trails + shape
-    vec3 color = bgColor;
-
-    // Add trail glow (additive blending)
-    color = color + trailColor;
-
-    // Draw shape on top
+    // Draw main shape on top
     color = mix(color, fillColor, fill);
 
     gl_FragColor = vec4(color, 1.0);

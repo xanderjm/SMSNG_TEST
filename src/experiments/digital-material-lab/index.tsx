@@ -8,6 +8,13 @@ import type { CurvePoint } from './MultiPointCurveEditor';
 import { evaluateCatmullRom } from './MultiPointCurveEditor';
 import { vertexShaderSource, fragmentShaderSource } from './shaders';
 
+// Canvas dimensions (Samsung screen ratio)
+export const CANVAS_WIDTH = 1440;
+export const CANVAS_HEIGHT = 3120;
+
+// Viewport mode type
+export type ViewportMode = 'fit' | '1:1';
+
 // Variable definition - each variable maps the shared curve to its own min/max range
 export interface EffectVariable {
   id: string;
@@ -172,15 +179,25 @@ export function DigitalMaterialLab() {
   const programRef = useRef<WebGLProgram | null>(null);
   const animationRef = useRef<number>(0);
   const animControllerRef = useRef<AnimationController | null>(null);
+  const viewportContainerRef = useRef<HTMLDivElement>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordedChunksRef = useRef<Blob[]>([]);
 
   const [uniforms, setUniforms] = useState<MaterialUniforms>(defaultUniforms);
   const [animConfig, setAnimConfig] = useState<AnimationConfig>(defaultAnimConfig);
   const [isExpanded, setIsExpanded] = useState(false);
+  const [viewportMode, setViewportMode] = useState<ViewportMode>('fit');
+  const [viewportScale, setViewportScale] = useState(1);
+  const [isRecording, setIsRecording] = useState(false);
 
-  // Initialize WebGL
+  // Initialize WebGL with fixed canvas dimensions
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+
+    // Set fixed canvas dimensions (always render at 1:1 for recording)
+    canvas.width = CANVAS_WIDTH;
+    canvas.height = CANVAS_HEIGHT;
 
     const gl = createWebGLContext(canvas);
     if (!gl) {
@@ -188,6 +205,7 @@ export function DigitalMaterialLab() {
       return;
     }
     glRef.current = gl;
+    gl.viewport(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
     const vertShader = compileShader(gl, gl.VERTEX_SHADER, vertexShaderSource);
     const fragShader = compileShader(gl, gl.FRAGMENT_SHADER, fragmentShaderSource);
@@ -228,24 +246,93 @@ export function DigitalMaterialLab() {
     };
   }, []);
 
-  // Handle resize
+  // Calculate viewport scale based on mode and available space
   useEffect(() => {
-    const handleResize = () => {
-      const canvas = canvasRef.current;
-      const gl = glRef.current;
-      if (!canvas || !gl) return;
+    const calculateScale = () => {
+      const container = viewportContainerRef.current;
+      if (!container) return;
 
-      const dpr = window.devicePixelRatio || 1;
-      const rect = canvas.getBoundingClientRect();
-      canvas.width = rect.width * dpr;
-      canvas.height = rect.height * dpr;
-      gl.viewport(0, 0, canvas.width, canvas.height);
+      if (viewportMode === '1:1') {
+        setViewportScale(1);
+        return;
+      }
+
+      // Fit mode: scale to fit container with padding
+      const padding = 32; // 16px on each side
+      const containerWidth = container.clientWidth - padding;
+      const containerHeight = container.clientHeight - padding;
+
+      const scaleX = containerWidth / CANVAS_WIDTH;
+      const scaleY = containerHeight / CANVAS_HEIGHT;
+      const scale = Math.min(scaleX, scaleY, 1); // Don't upscale beyond 1:1
+
+      setViewportScale(scale);
     };
 
-    handleResize();
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+    calculateScale();
+    window.addEventListener('resize', calculateScale);
+    return () => window.removeEventListener('resize', calculateScale);
+  }, [viewportMode]);
+
+  // Recording functions
+  const startRecording = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || isRecording) return;
+
+    recordedChunksRef.current = [];
+
+    // Capture stream at 60fps
+    const stream = canvas.captureStream(60);
+
+    // Try to use WebM codec (best browser support)
+    const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
+      ? 'video/webm;codecs=vp9'
+      : MediaRecorder.isTypeSupported('video/webm;codecs=vp8')
+        ? 'video/webm;codecs=vp8'
+        : 'video/webm';
+
+    const mediaRecorder = new MediaRecorder(stream, {
+      mimeType,
+      videoBitsPerSecond: 25000000, // 25 Mbps for high quality
+    });
+
+    mediaRecorder.ondataavailable = (event) => {
+      if (event.data.size > 0) {
+        recordedChunksRef.current.push(event.data);
+      }
+    };
+
+    mediaRecorder.onstop = () => {
+      const blob = new Blob(recordedChunksRef.current, { type: mimeType });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `digital-material-${Date.now()}.webm`;
+      a.click();
+      URL.revokeObjectURL(url);
+      recordedChunksRef.current = [];
+    };
+
+    mediaRecorderRef.current = mediaRecorder;
+    mediaRecorder.start(100); // Collect data every 100ms
+    setIsRecording(true);
+  }, [isRecording]);
+
+  const stopRecording = useCallback(() => {
+    const mediaRecorder = mediaRecorderRef.current;
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+      mediaRecorder.stop();
+      setIsRecording(false);
+    }
   }, []);
+
+  const toggleRecording = useCallback(() => {
+    if (isRecording) {
+      stopRecording();
+    } else {
+      startRecording();
+    }
+  }, [isRecording, startRecording, stopRecording]);
 
   // Render loop
   useEffect(() => {
@@ -376,9 +463,14 @@ export function DigitalMaterialLab() {
   };
 
   return (
-    <div className="h-screen w-screen bg-[#0d0d14] overflow-hidden relative flex">
-      {/* Main Canvas Area */}
-      <div className="flex-1 relative">
+    <div className="h-screen w-screen bg-neutral-500 overflow-hidden relative flex">
+      {/* Main Viewport Area - 50% grey background */}
+      <div
+        ref={viewportContainerRef}
+        className={`flex-1 relative flex items-center justify-center ${
+          viewportMode === '1:1' ? 'overflow-auto' : 'overflow-hidden'
+        }`}
+      >
         {/* Back Navigation */}
         <div className="absolute top-4 left-4 z-50">
           <Link
@@ -405,21 +497,42 @@ export function DigitalMaterialLab() {
           <h1 className="text-lg font-medium text-white/80">Digital Material Lab</h1>
         </div>
 
+        {/* Recording indicator */}
+        {isRecording && (
+          <div className="absolute top-4 left-1/2 translate-x-16 z-50 flex items-center gap-2">
+            <div className="w-3 h-3 rounded-full bg-red-500 animate-pulse" />
+            <span className="text-xs text-red-400 font-medium">REC</span>
+          </div>
+        )}
+
         {/* Hint */}
         <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-50 text-gray-600 text-xs">
           <span className="opacity-60">Tap to animate</span>
         </div>
 
-        {/* WebGL Canvas */}
-        <canvas
-          ref={canvasRef}
-          className="w-full h-full cursor-pointer touch-none"
-          onClick={handleCanvasClick}
-          onTouchEnd={(e) => {
-            e.preventDefault();
-            handleCanvasClick();
+        {/* Canvas Container - scaled for display */}
+        <div
+          className="relative flex-shrink-0"
+          style={{
+            width: CANVAS_WIDTH * viewportScale,
+            height: CANVAS_HEIGHT * viewportScale,
           }}
-        />
+        >
+          {/* WebGL Canvas - always renders at 1440x3120, scaled via CSS */}
+          <canvas
+            ref={canvasRef}
+            className="cursor-pointer touch-none"
+            style={{
+              width: CANVAS_WIDTH * viewportScale,
+              height: CANVAS_HEIGHT * viewportScale,
+            }}
+            onClick={handleCanvasClick}
+            onTouchEnd={(e) => {
+              e.preventDefault();
+              handleCanvasClick();
+            }}
+          />
+        </div>
       </div>
 
       {/* Settings Panel - Always visible */}
@@ -428,6 +541,10 @@ export function DigitalMaterialLab() {
         onUniformsChange={setUniforms}
         animConfig={animConfig}
         onAnimConfigChange={setAnimConfig}
+        viewportMode={viewportMode}
+        onViewportModeChange={setViewportMode}
+        isRecording={isRecording}
+        onToggleRecording={toggleRecording}
       />
     </div>
   );

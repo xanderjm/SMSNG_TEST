@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { ArrowLeft, RotateCcw } from 'lucide-react';
 import { SettingsPanel } from './SettingsPanel';
 import { createWebGLContext, compileShader, createProgram } from './webgl';
-import { AnimationController, cubicBezier } from './animation';
+import { AnimationController, cubicBezierWithEndpoints } from './animation';
 import { vertexShaderSource, fragmentShaderSource } from './shaders';
 
 // Effect definition - the basis for all animated effects
@@ -62,12 +62,13 @@ export function calculateEffectValue(effect: Effect, expansionProgress: number):
   }
 
   // During effect's timeline window - interpolate using curve
+  // The curve evaluates with curveStart and curveEnd as the actual Y endpoints
+  // This allows parabolic curves where start=end but the curve bulges in the middle
   const localProgress = (expansionProgress - startT) / (endT - startT);
-  const curveOutput = cubicBezier(localProgress, curve); // 0-1
+  const curveOutput = cubicBezierWithEndpoints(localProgress, curve, curveStart, curveEnd);
 
-  // Map curve output through curveStart → curveEnd, then through min → max
-  const mappedOutput = curveStart + (curveEnd - curveStart) * curveOutput;
-  return min + (max - min) * mappedOutput;
+  // curveOutput is already in 0-1 effect space, map to min-max
+  return min + (max - min) * curveOutput;
 }
 
 // Capsule dimensions in pixels (based on ~1440 height viewport)

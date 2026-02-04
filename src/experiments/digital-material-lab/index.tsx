@@ -242,6 +242,7 @@ export function DigitalMaterialLab() {
   const trailFboARef = useRef<FramebufferObject | null>(null);
   const trailFboBRef = useRef<FramebufferObject | null>(null);
   const trailPingPongRef = useRef<number>(0);  // 0 = A is read, B is write; 1 = B is read, A is write
+  const prevSizeRef = useRef<[number, number]>([0, 0]);  // Track previous size for velocity calculation
 
   // Background image texture ref
   const backgroundTextureRef = useRef<WebGLTexture | null>(null);
@@ -632,6 +633,20 @@ export function DigitalMaterialLab() {
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
       // ========== PASS 2: Accumulate trail (if enabled) ==========
+      // Calculate velocity from size change (movement detection)
+      const prevSize = prevSizeRef.current;
+      const velocityX = currentSize[0] - prevSize[0];
+      const velocityY = currentSize[1] - prevSize[1];
+      const velocity = Math.sqrt(velocityX * velocityX + velocityY * velocityY);
+
+      // Normalize velocity direction (for directional smear)
+      const velocityMag = Math.max(velocity, 0.0001);
+      const velocityDirX = velocityX / velocityMag;
+      const velocityDirY = velocityY / velocityMag;
+
+      // Update previous size for next frame
+      prevSizeRef.current = [...currentSize];
+
       if (trailEnabled && trailAmount > 0.01) {
         gl.bindFramebuffer(gl.FRAMEBUFFER, writeTrailFbo.framebuffer);
         gl.viewport(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
@@ -650,12 +665,15 @@ export function DigitalMaterialLab() {
         gl.bindTexture(gl.TEXTURE_2D, readTrailFbo.texture);
         setUniformI(trailProg, 'u_previousTrail', 1);
 
-        // Trail parameters - persistence now affects fade rate
-        // Map persistence 0-1 to fade rate: 0 = fast fade (0.85), 1 = slow fade (0.995)
-        const fadeRate = 0.85 + trailPersistence * 0.145;
+        // Trail parameters
+        // Persistence: 0 = fast fade (0.8), 1 = slow fade (0.97)
+        // Note: 0.97^60 ≈ 0.16 after 1 second - actually fades to near-zero
+        const fadeRate = 0.8 + trailPersistence * 0.17;
         setUniform(trailProg, 'u_persistence', fadeRate);
         setUniform(trailProg, 'u_trailAmount', trailAmount);
         setUniform(trailProg, 'u_trailColor', trailColor);
+        setUniform(trailProg, 'u_velocity', velocity);
+        setUniform(trailProg, 'u_velocityDir', [velocityDirX, velocityDirY]);
 
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 

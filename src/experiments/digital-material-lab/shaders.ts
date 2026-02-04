@@ -107,6 +107,7 @@ export const shapeFragmentShaderSource = `
 `;
 
 // Trail accumulation shader - blends current shape with previous trail buffer
+// Only adds to trail when there's movement (velocity > 0)
 export const trailAccumulateShaderSource = `
   precision highp float;
 
@@ -114,30 +115,38 @@ export const trailAccumulateShaderSource = `
 
   uniform sampler2D u_currentShape;    // Current shape (from shapeFragmentShader)
   uniform sampler2D u_previousTrail;   // Previous trail buffer
-  uniform float u_persistence;         // How much trail persists (0-1)
+  uniform float u_persistence;         // Fade multiplier per frame (0.8-0.98)
   uniform float u_trailAmount;         // Trail intensity/opacity
   uniform vec3 u_trailColor;           // Current trail color
+  uniform float u_velocity;            // Movement velocity (0 = stationary)
+  uniform vec2 u_velocityDir;          // Normalized velocity direction for smear
 
   void main() {
+    // Optional: UV offset for directional smear effect
+    // Smear in opposite direction of movement for trailing effect
+    vec2 smearOffset = -u_velocityDir * 0.003 * u_persistence;
+    vec4 previousTrail = texture2D(u_previousTrail, v_texCoord + smearOffset);
     vec4 currentShape = texture2D(u_currentShape, v_texCoord);
-    vec4 previousTrail = texture2D(u_previousTrail, v_texCoord);
 
-    // Fade the previous trail by persistence factor
+    // Simple multiplicative fade - will actually reach zero
+    // Apply a threshold to kill very dim values and prevent ghosting
     vec3 fadedTrail = previousTrail.rgb * u_persistence;
-    float fadedAlpha = previousTrail.a * u_persistence;
+    fadedTrail = fadedTrail * step(0.01, fadedTrail);  // Kill values below threshold
 
-    // Add current shape to trail with color
-    vec3 newTrailColor = u_trailColor * currentShape.a * u_trailAmount;
-    float newAlpha = currentShape.a * u_trailAmount;
+    // Only add new trail when there's movement
+    // smoothstep creates a gradual ramp: no trail when still, full trail when moving fast
+    float movementMask = smoothstep(0.0, 0.05, u_velocity);
 
-    // Additive blend for glow effect, but cap to prevent blowout
-    vec3 combinedColor = fadedTrail + newTrailColor;
-    float combinedAlpha = max(fadedAlpha, newAlpha);
+    // New trail contribution - only when moving
+    vec3 newTrailColor = u_trailColor * currentShape.a * u_trailAmount * movementMask;
 
-    // Soft clamp to prevent excessive brightness
-    combinedColor = combinedColor / (1.0 + combinedColor * 0.5);
+    // Simple additive blend (no soft clamp - allows proper fading)
+    vec3 result = fadedTrail + newTrailColor;
 
-    gl_FragColor = vec4(combinedColor, combinedAlpha);
+    // Hard clamp to prevent blowout but allow zeros
+    result = min(result, vec3(2.0));
+
+    gl_FragColor = vec4(result, 1.0);
   }
 `;
 

@@ -176,6 +176,7 @@ export const fragmentShaderSource = `
   // Background
   uniform float u_hasBackground;
   uniform sampler2D u_backgroundTexture;
+  uniform float u_backgroundAspect;      // Image width/height ratio
 
   // Digital Material (for future use)
   uniform float u_viscosity;
@@ -215,7 +216,22 @@ export const fragmentShaderSource = `
     // Get background color
     vec3 bgColor = vec3(0.05, 0.05, 0.08);
     if (u_hasBackground > 0.5) {
-      vec2 bgUV = vec2(v_texCoord.x, 1.0 - v_texCoord.y);
+      // Calculate "cover" mode UVs - image fills canvas, excess is cropped
+      float canvasAspect = u_resolution.x / u_resolution.y;
+      vec2 bgUV = v_texCoord;
+
+      if (u_backgroundAspect > canvasAspect) {
+        // Image is wider than canvas - crop sides
+        float scale = canvasAspect / u_backgroundAspect;
+        bgUV.x = bgUV.x * scale + (1.0 - scale) * 0.5;
+      } else {
+        // Image is taller than canvas - crop top/bottom
+        float scale = u_backgroundAspect / canvasAspect;
+        bgUV.y = bgUV.y * scale + (1.0 - scale) * 0.5;
+      }
+
+      // Flip Y for correct orientation
+      bgUV.y = 1.0 - bgUV.y;
       bgColor = texture2D(u_backgroundTexture, bgUV).rgb;
     }
 

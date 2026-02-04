@@ -246,6 +246,7 @@ export function DigitalMaterialLab() {
 
   // Background image texture ref
   const backgroundTextureRef = useRef<WebGLTexture | null>(null);
+  const backgroundAspectRef = useRef<number>(1);  // Image width/height ratio for cover mode
 
   // Initialize WebGL with fixed canvas dimensions
   useEffect(() => {
@@ -380,6 +381,9 @@ export function DigitalMaterialLab() {
           gl.deleteTexture(backgroundTextureRef.current);
         }
 
+        // Store aspect ratio for cover mode calculation
+        backgroundAspectRef.current = image.width / image.height;
+
         const texture = gl.createTexture();
         gl.bindTexture(gl.TEXTURE_2D, texture);
         gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
@@ -396,6 +400,7 @@ export function DigitalMaterialLab() {
         gl.deleteTexture(backgroundTextureRef.current);
         backgroundTextureRef.current = null;
       }
+      backgroundAspectRef.current = 1;
     }
   }, [animConfig.backgroundImage]);
 
@@ -706,6 +711,7 @@ export function DigitalMaterialLab() {
       // Background texture
       const hasBackground = backgroundTextureRef.current !== null;
       setUniform(program, 'u_hasBackground', hasBackground ? 1.0 : 0.0);
+      setUniform(program, 'u_backgroundAspect', backgroundAspectRef.current);
 
       if (hasBackground) {
         gl.activeTexture(gl.TEXTURE1);

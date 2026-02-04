@@ -7,17 +7,17 @@ import { AnimationController, cubicBezier } from './animation';
 import { vertexShaderSource, fragmentShaderSource } from './shaders';
 
 // Effect definition - the basis for all animated effects
+// Effects interpolate between curveStart and curveEnd based on expansion progress (0=contracted, 1=expanded)
 export interface Effect {
   id: string;
   name: string;
   enabled: boolean;
-  mode: 'state' | 'animated';  // state = start/end represent two states, animated = plays during timeline window
   min: number;             // Minimum possible value (absolute)
   max: number;             // Maximum possible value (absolute)
-  startT: number;          // Start position on master timeline (0-1) - only used in animated mode
-  endT: number;            // End position on master timeline (0-1) - only used in animated mode
-  curveStart: number;      // Curve start Y position (0-1, maps to min-max range)
-  curveEnd: number;        // Curve end Y position (0-1, maps to min-max range)
+  startT: number;          // When effect starts transitioning (0-1 of expansion)
+  endT: number;            // When effect finishes transitioning (0-1 of expansion)
+  curveStart: number;      // Value at startT (0-1, maps to min-max range)
+  curveEnd: number;        // Value at endT (0-1, maps to min-max range)
   curve: [number, number, number, number];  // Bezier control points [x1, y1, x2, y2]
 }
 
@@ -41,43 +41,33 @@ export interface AnimationConfig {
   effects: Effect[];
 }
 
-// Calculate the current value of an effect based on master timeline progress
-export function calculateEffectValue(effect: Effect, masterProgress: number): number {
-  const { startT, endT, min, max, curveStart, curveEnd, curve, enabled, mode } = effect;
+// Calculate the current value of an effect based on expansion progress
+// expansionProgress: 0 = fully contracted, 1 = fully expanded
+export function calculateEffectValue(effect: Effect, expansionProgress: number): number {
+  const { startT, endT, min, max, curveStart, curveEnd, curve, enabled } = effect;
 
-  // If disabled, return the value at curve start position
+  // If disabled, return the value at curve start position (contracted state)
   if (!enabled) {
     return min + (max - min) * curveStart;
   }
 
-  if (mode === 'state') {
-    // State mode: curveStart = collapsed state, curveEnd = expanded state
-    // Interpolate between them based on master progress using the curve
-    const curveOutput = cubicBezier(masterProgress, curve); // Returns 0-1
-    const mappedOutput = curveStart + (curveEnd - curveStart) * curveOutput;
-    return min + (max - min) * mappedOutput;
-  } else {
-    // Animated mode: effect plays during its timeline window (startT to endT)
-    // Before effect starts - use the curve's start value
-    if (masterProgress <= startT) {
-      return min + (max - min) * curveStart;
-    }
-
-    // After effect ends - use the curve's end value
-    if (masterProgress >= endT) {
-      return min + (max - min) * curveEnd;
-    }
-
-    // During effect - calculate local progress and apply curve
-    const localProgress = (masterProgress - startT) / (endT - startT);
-    const curveOutput = cubicBezier(localProgress, curve); // Returns 0-1
-
-    // Map curve output (0-1) to the curveStart-curveEnd range
-    const mappedOutput = curveStart + (curveEnd - curveStart) * curveOutput;
-
-    // Map that to the min-max range
-    return min + (max - min) * mappedOutput;
+  // Before effect's timeline window - stay at start value
+  if (expansionProgress <= startT) {
+    return min + (max - min) * curveStart;
   }
+
+  // After effect's timeline window - stay at end value
+  if (expansionProgress >= endT) {
+    return min + (max - min) * curveEnd;
+  }
+
+  // During effect's timeline window - interpolate using curve
+  const localProgress = (expansionProgress - startT) / (endT - startT);
+  const curveOutput = cubicBezier(localProgress, curve); // 0-1
+
+  // Map curve output through curveStart → curveEnd, then through min → max
+  const mappedOutput = curveStart + (curveEnd - curveStart) * curveOutput;
+  return min + (max - min) * mappedOutput;
 }
 
 // Capsule dimensions in pixels (based on ~1440 height viewport)
@@ -105,13 +95,12 @@ const defaultAnimConfig: AnimationConfig = {
       id: 'cornerRadius',
       name: 'Corner Roundness',
       enabled: true,
-      mode: 'state',          // State-based: collapsed vs expanded
       min: 0.01,              // Minimum corner radius
       max: 0.15,              // Maximum corner radius
-      startT: 0,              // Start at beginning of timeline (used in animated mode)
-      endT: 1,                // End at end of timeline (used in animated mode)
-      curveStart: 0,          // Start at 0 (min value in collapsed state)
-      curveEnd: 1,            // End at 1 (max value in expanded state)
+      startT: 0,              // Effect starts at beginning of expansion
+      endT: 1,                // Effect ends at full expansion
+      curveStart: 0,          // At contracted: min (0.01)
+      curveEnd: 1,            // At expanded: max (0.15)
       curve: [0.4, 0, 0.2, 1], // Simple ease
     },
   ],
@@ -219,19 +208,21 @@ export function DigitalMaterialLab() {
         masterProgress = animController.getProgress();
       }
 
-      // Calculate animated size based on expansion state and master progress
-      const targetSize: [number, number] = isExpanded ? EXPANDED_SIZE : CONTRACTED_SIZE;
-      const baseSize: [number, number] = isExpanded ? CONTRACTED_SIZE : EXPANDED_SIZE;
+      // Calculate expansion progress (0 = contracted, 1 = expanded)
+      // When expanding: expansionProgress goes 0→1
+      // When collapsing: expansionProgress goes 1→0
+      const expansionProgress = isExpanded ? masterProgress : (1 - masterProgress);
 
+      // Calculate current size based on expansion progress
       const currentSize: [number, number] = [
-        baseSize[0] + (targetSize[0] - baseSize[0]) * masterProgress,
-        baseSize[1] + (targetSize[1] - baseSize[1]) * masterProgress,
+        CONTRACTED_SIZE[0] + (EXPANDED_SIZE[0] - CONTRACTED_SIZE[0]) * expansionProgress,
+        CONTRACTED_SIZE[1] + (EXPANDED_SIZE[1] - CONTRACTED_SIZE[1]) * expansionProgress,
       ];
 
-      // Calculate effect values
+      // Calculate effect values using expansion progress
       const cornerRadiusEffect = animConfig.effects.find(e => e.id === 'cornerRadius');
       const rawCornerRadius = cornerRadiusEffect
-        ? calculateEffectValue(cornerRadiusEffect, masterProgress)
+        ? calculateEffectValue(cornerRadiusEffect, expansionProgress)
         : uniforms.cornerRadius;
 
       // Clamp corner radius to half the shortest edge to prevent pinching
